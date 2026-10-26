@@ -45,6 +45,10 @@ data class PanelModel(
     val now: Double,
     /** This device's Keep Screen On (its own preference, never sent). */
     val keepScreenOn: Boolean = true,
+    /** Pinch open hides this window's bar. The switch only allows the gesture. */
+    val pinchToFill: Boolean = true,
+    /** Two fingers, twice, shows the keyboard. Off until turned on. */
+    val keyboardDoubleTap: Boolean = false,
 )
 
 /**
@@ -59,6 +63,8 @@ class SettingsPanelView(context: Context, dp: Dp) : Sheet(context, dp) {
     var onDone: () -> Unit = {}
     var onDisconnect: () -> Unit = {}
     var onKeepScreenOn: (Boolean) -> Unit = {}
+    var onPinchToFill: (Boolean) -> Unit = {}
+    var onKeyboardDoubleTap: (Boolean) -> Unit = {}
     /** The most height the panel may take (core's layout gives the room). */
     var maxHeight = Int.MAX_VALUE
 
@@ -153,6 +159,14 @@ class SettingsPanelView(context: Context, dp: Dp) : Sheet(context, dp) {
             add(SwitchRow(context, dp, PanelCopy.keepScreenOn, m.keepScreenOn, true, false) { onKeepScreenOn(it) })
         })
         middle.addView(Footnote(context, dp, PanelCopy.keepScreenOnFooter(mac, m.device, m.keepScreenOn)))
+        middle.addView(Group(context, dp).apply {
+            add(SwitchRow(context, dp, "Pinch to Fill the Screen", m.pinchToFill, true, false) { onPinchToFill(it) })
+        })
+        middle.addView(Footnote(context, dp, "Turn this on, then pinch open on a window’s picture to hide the bar, and pinch closed to bring it back. The Desktop keeps the bar. Turning this off brings the bar back."))
+        middle.addView(Group(context, dp).apply {
+            add(SwitchRow(context, dp, "Double-Tap for the Keyboard", m.keyboardDoubleTap, true, false) { onKeyboardDoubleTap(it) })
+        })
+        middle.addView(Footnote(context, dp, "Two fingers, twice, on the picture shows or hides the keyboard. It does nothing while a hardware keyboard is attached."))
     }
 
     private fun pending(m: PanelModel, f: SettingsField) = m.pendingSince(f)?.let { m.now - it >= Ui.pendingDelay } ?: false

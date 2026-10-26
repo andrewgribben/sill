@@ -126,6 +126,12 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
     private var appList: List<AppInfo> = emptyList()
     private var order: List<Long> = emptyList()
     private lateinit var gestures: TouchGestures
+    private lateinit var chrome: ChromeTouch
+    /** This window's picture hides the bar. The Desktop keeps it. The switch only allows the pinch. */
+    private var pictureFills = false
+    /** A pinch has sized the Mac window, so later viewports send 1× until Aa says otherwise. */
+    private var sizedByFill = false
+    private var fillArea: Rect? = null
     private var ticking = false
     private var lastClip: String? = null
     private var insets = Insets.zero
@@ -155,6 +161,18 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
         app.streamScreen = this
         dp = Dp(this)
         gestures = TouchGestures(dp.density) { e -> session?.input(e) }
+        chrome = ChromeTouch(10.0 * dp.density,
+            onFill = { open ->
+                if (list?.active !is StreamSource.Window || pictureFills == open) return@ChromeTouch
+                pictureFills = open
+                if (open) sizedByFill = true
+                relayout()
+            },
+            onKeyboard = { ui.tapKeyboard() },
+            forwardDown = { id, x, y, time -> gestures.down(id, x, y, time) },
+            forwardMove = { id, x, y, time -> gestures.move(id, x, y, time) },
+            forwardUp = { id, x, y, time -> gestures.up(id, x, y, time) },
+            forwardCancel = { gestures.cancel() })
         Look.edgeToEdge(this)
 
         root = StreamRoot(this).apply { setBackgroundColor(Color.BLACK) }
@@ -249,6 +267,12 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
         panel.onDone = { ui.closeSettings() }
         panel.onDisconnect = { app.client.disconnect(); finish() }
         panel.onKeepScreenOn = { on -> prefs.edit().putString(KEEP_SCREEN_ON, if (on) "1" else "0").apply(); applyKeepScreenOn(); refreshPanel() }
+        panel.onPinchToFill = { on ->
+            prefs.edit().putString(PINCH_TO_FILL, if (on) "1" else "0").apply()
+            if (!on) pictureFills = false
+            refreshPanel(); relayout()
+        }
+        panel.onKeyboardDoubleTap = { on -> prefs.edit().putString(KEYBOARD_DOUBLE_TAP, if (on) "1" else "0").apply(); refreshPanel() }
         applyKeepScreenOn()
         pad.tracker.latched = { ui.state.latched }
         pad.tracker.onLatchSpent = { ui.latch(0) }
@@ -372,6 +396,11 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
         val l = StreamLayout.of(safe, phone = resources.configuration.smallestScreenWidthDp < 600, menus = macMenus.state.hasMenus,
             spotlight = active == StreamSource.Desktop, video = video, fold = fold, aspect = DuoPosture.paneAspect(video, fitted))
         layout = l
+        if (fillsNow) {
+            placeFilled()
+            return
+        }
+        fillArea = null
         val ox = insets.left; val oy = insets.top
         fun box(r: Rect) = dp.px.box(r, ox, oy)
 
@@ -429,6 +458,39 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
         showLights(ui.state.windowMenu)
         scheduleViewport()
     }
+
+    /** The picture takes the whole screen and the bar, keys and trackpad go. */
+    private fun placeFilled() {
+        val full = PxBox(0, 0, root.width, root.height)
+        root.place(barBg, null)
+        root.place(backdrop, null)
+        root.place(outline, null)
+        root.place(pointer, full)
+        root.place(input, full)
+        val fit = FrameMapping.fit(if (videoW > 0) videoW.toDouble() else 16.0, if (videoH > 0) videoH.toDouble() else 10.0, full.width.toDouble(), full.height.toDouble())
+        videoBox = PxBox(fit.x.toInt(), fit.y.toInt(), (fit.x + fit.w).toInt(), (fit.y + fit.h).toInt())
+        root.place(surface, videoBox)
+        gestures.frameRect = fit
+        pointer.frame = android.graphics.RectF(fit.x.toFloat(), fit.y.toFloat(), (fit.x + fit.w).toFloat(), (fit.y + fit.h).toFloat())
+        for (b in listOf(apps, menusButton, keyboard, desktop, settingsButton, aa, strip, pad)) root.place(b, null)
+        caps.forEach { root.place(it, null) }
+        val l = layout ?: return
+        val ox = insets.left; val oy = insets.top
+        fun box(r: Rect) = dp.px.box(r, ox, oy)
+        root.place(drawer, box(l.drawer))
+        root.place(panel, box(l.settings), wrapHeight = true)
+        panel.maxHeight = box(l.settings).height
+        root.place(lights, PxBox(0, 0, root.width, root.height))
+        placeDims(l.dim.map(::box))
+        root.systemGestureExclusionRects = emptyList()
+        fillArea = Rect(0.0, 0.0, dp.px.dp(root.width), dp.px.dp(root.height))
+        root.requestLayout()
+        applyPanel()
+        showLights(ui.state.windowMenu)
+        scheduleViewport()
+    }
+
+    private val fillsNow get() = pinchToFill && pictureFills && list?.active is StreamSource.Window
 
     private fun placeCaps(l: StreamLayout, box: (Rect) -> PxBox) {
         val keys: List<KeyRow.Key> = when (l) {
@@ -492,13 +554,14 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
 
     private fun sendViewport() {
         val l = layout ?: return
-        val area = (l as? StreamLayout.Phone)?.viewport ?: l.panel
+        val area = fillArea ?: ((l as? StreamLayout.Phone)?.viewport ?: l.panel)
         if (area.width <= 0 || area.height <= 0) return
         @Suppress("DEPRECATION")
         val rate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display?.refreshRate else windowManager.defaultDisplay.refreshRate
         val lowPower = (getSystemService(Context.POWER_SERVICE) as PowerManager).isPowerSaveMode
         val fps = if (!lowPower && (rate ?: 60f) >= 100f) 120 else 60
-        val v = Viewport(area.width, area.height, ui.state.textScale, fps = fps)
+        val scale = if (fillArea != null || sizedByFill) ui.state.textScale ?: 1.0 else ui.state.textScale
+        val v = Viewport(area.width, area.height, scale, fps = fps)
         if (v == sentViewport) return
         sentViewport = v
         session?.setViewport(v)
@@ -544,12 +607,18 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
             }
             return true
         }
+        chrome.pinchEnabled = pinchToFill
+        chrome.keyboardEnabled = keyboardDoubleTap
+        chrome.hardwareKeyboard = hardwareKeyboardAttached()
         val i = e.actionIndex
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> gestures.down(e.getPointerId(i), e.getX(i).toDouble(), e.getY(i).toDouble(), t)
-            MotionEvent.ACTION_MOVE -> for (k in 0 until e.pointerCount) gestures.move(e.getPointerId(k), e.getX(k).toDouble(), e.getY(k).toDouble(), t)
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> gestures.up(e.getPointerId(i), e.getX(i).toDouble(), e.getY(i).toDouble(), t)
-            MotionEvent.ACTION_CANCEL -> gestures.cancel()
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> chrome.down(e.getPointerId(i), e.getX(i).toDouble(), e.getY(i).toDouble(), t)
+            MotionEvent.ACTION_MOVE -> {
+                for (k in 0 until e.pointerCount) chrome.move(e.getPointerId(k), e.getX(k).toDouble(), e.getY(k).toDouble(), t)
+                chrome.endSample(t)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> chrome.up(e.getPointerId(i), e.getX(i).toDouble(), e.getY(i).toDouble(), t)
+            MotionEvent.ACTION_CANCEL -> chrome.cancel()
         }
         ensureTicks()
         return true
@@ -615,6 +684,13 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
     private val prefs by lazy { getSharedPreferences("sill", Context.MODE_PRIVATE) }
     /** On unless turned off: this screen exists only while connected, so it is "while connected". */
     private val keepScreenOn get() = prefs.getString(KEEP_SCREEN_ON, null) != "0"
+    private val pinchToFill get() = prefs.getString(PINCH_TO_FILL, null) != "0"
+    private val keyboardDoubleTap get() = prefs.getString(KEYBOARD_DOUBLE_TAP, null) == "1"
+
+    private fun hardwareKeyboardAttached(): Boolean {
+        val c = resources.configuration
+        return c.keyboard != Configuration.KEYBOARD_NOKEYS && c.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO
+    }
 
     /** The window's keep-screen-on flag, as a video player's: a stream only watched never dims or locks. */
     private fun applyKeepScreenOn() {
@@ -692,7 +768,7 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
         val wanted = if (!pm.isPowerSaveMode && (rate ?: 60f) >= 100f) 120 else 60
         val noun = if (resources.configuration.smallestScreenWidthDp >= 600) "tablet" else "phone"
         panel.update(PanelModel(app.sessionMac, noun, ledger.host, ledger.displayed, wanted, pm.isPowerSaveMode, olderMac, problem,
-            { f -> ledger.pendingSince(f) }, now(), keepScreenOn))
+            { f -> ledger.pendingSince(f) }, now(), keepScreenOn, pinchToFill, keyboardDoubleTap))
     }
 
     private fun refreshStrip() {
@@ -825,3 +901,5 @@ class KeyInputView(private val activity: StreamActivity) : View(activity) {
 
 /** This device's Keep Screen On (the Settings panel's This phone group; iOS's `Sill.keepScreenOn`). */
 private const val KEEP_SCREEN_ON = "Sill.keepScreenOn"
+private const val PINCH_TO_FILL = "Sill.pinchToFill"
+private const val KEYBOARD_DOUBLE_TAP = "Sill.keyboardDoubleTap"
