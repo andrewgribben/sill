@@ -3,7 +3,7 @@ import Network
 import StreamProtocol
 
 struct ContentView: View {
-    @StateObject private var client = StreamClient()
+    @StateObject private var client = StreamClient(lane: StreamClient.mintLane())
     /// Tells the host what this device sees, once a second while connected. Also covers the DEBUG
     /// harness's `-SillLive 1` session, which runs on this same client.
     @StateObject private var statsReporter = ClientStatsReporter()
@@ -221,6 +221,13 @@ struct ContentView: View {
 ///   clipboard rows. `-SillClipboardChip 1` offers the clipboard's chip over the mock's stream (as
 ///   after a copy on this device; it stays), and `-SillClipboardNote sent|long|notsent` shows a Paste's
 ///   note in its place and under the group's Paste (docs/clipboard-plan.md).
+/// * `-Sill.pinchToFill 0` — not a harness argument either: Pinch to Fill the Screen off for one
+///   run. On unless set off. A pinch then changes nothing. With it on, pinch open on one window’s
+///   picture hides that window’s bar; pinch closed brings it back. Other windows stay as they are.
+///   The Desktop keeps the bar either way.
+/// * `-Sill.keyboardDoubleTap 1` — not a harness argument either: two fingers tapped twice on the
+///   picture show or hide the on-screen keyboard. Off unless set, so a two-finger drag still scrolls.
+///   Nothing happens while a hardware keyboard is attached.
 /// * `-Sill.largerPicture 1` — not a harness argument either: this device's Larger Picture switch
 ///   (the Settings panel's This iPhone group; docs/larger-picture-plan.md) on for one run, in the
 ///   normal app too. A phone held upright then has, while a window streams, no thumbnails, the

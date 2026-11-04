@@ -19,12 +19,16 @@ import StreamProtocol
 /// only. Errors show inline, never in alerts. After the Mac's settings come the device's own groups:
 /// This iPad (or iPhone), whose switches are preferences here and send nothing to the Mac (Larger
 /// Picture, `StreamClient.largerPictureKey`, on an iPhone without a hinge whose picture it makes
-/// larger, `largerPictureOffered`; Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares
+/// larger, `largerPictureOffered`; Pinch to Fill the Screen, `StreamClient.pinchToFillKey`, which
+/// allows a pinch on one window's picture to hide that window's bar; Double-Tap for the Keyboard,
+/// `StreamClient.keyboardDoubleTapKey`;
+/// Share Clipboard, `StreamClient.clipboardKey`, while the Mac shares
 /// its clipboard, with the system's Paste for this device's text; Three-Finger Gestures,
 /// `StreamClient.gesturesKey`; Keep Screen On, `StreamClient.keepScreenOnKey`), and whose gesture rows, as accessibility actions, do their gestures
 /// (`client.sendGesture`), since VoiceOver keeps three fingers for itself; then Take the Tour.
 struct HostSettingsPanel: View {
     @ObservedObject var client: StreamClient
+    @Environment(\.openWindow) private var openWindow
     /// Done, Esc or ⌘., and the VoiceOver escape gesture.
     let close: () -> Void
     /// Pair This iPad…: the stream screen puts the panel away and covers the stream with the
@@ -51,6 +55,8 @@ struct HostSettingsPanel: View {
     /// StreamClient+Clipboard at each decision; a change subscribes or stops at once.
     @AppStorage(StreamClient.clipboardKey) private var clipboardOn = true
     @AppStorage(StreamClient.keepScreenOnKey) private var keepScreenOn = true
+    @AppStorage(StreamClient.pinchToFillKey) private var pinchToFill = true
+    @AppStorage(StreamClient.keyboardDoubleTapKey) private var keyboardDoubleTap = false
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -486,6 +492,31 @@ struct HostSettingsPanel: View {
             }
             Footnote(text: Self.largerPictureFooter)
         }
+        Rows {
+            Toggle(isOn: $pinchToFill) {
+                Text("Pinch to Fill the Screen").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: Self.fillScreenFooter)
+        Rows {
+            Toggle(isOn: $keyboardDoubleTap) {
+                Text("Double-Tap for the Keyboard").foregroundStyle(Palette.text)
+            }
+            .rowFrame()
+        }
+        Footnote(text: Self.keyboardDoubleTapFooter(device: device))
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            Rows {
+                Button(action: { openWindow(id: "main") }) {
+                    Text("New Window")
+                        .foregroundStyle(Palette.accent)
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, 4)
+                }
+            }
+            Footnote(text: "Opens another Sill window. Pick a different Mac app in it. With Virtual Display on, a covered window keeps its picture.")
+        }
         // The clipboard (docs/clipboard-plan.md): only while the Mac says it shares it.
         if ClipboardPolicy.hostTakes(client.hostClipboard) {
             Rows {
@@ -545,6 +576,15 @@ struct HostSettingsPanel: View {
     /// once Aa sets its text size (or on the virtual display), and that a change applies as the panel
     /// closes (StreamScreen's `largerPictureHeld`).
     static let largerPictureFooter = "Held upright, a window’s picture takes the place of the window thumbnails and reaches down to where the keyboard comes up. The Desktop keeps the thumbnails. Switch windows with Apps: tap an open app again for its next window. To fill the taller picture with a window, set its text size with Aa. A change applies when you close Settings."
+
+    /// Under Pinch to Fill the Screen: the switch allows the gesture. The pinch, on one window,
+    /// hides or shows that window's bar. The Desktop keeps its bar.
+    static let fillScreenFooter = "Turn this on, then pinch open on a window’s picture to hide the bar on that window, and pinch closed to bring it back. Other windows stay as they are. The Desktop keeps the bar. Turning this off brings the bars back."
+
+    /// Under Double-Tap for the Keyboard. Fingers only, and a hardware keyboard is left alone.
+    static func keyboardDoubleTapFooter(device: String) -> String {
+        "Two fingers tapped twice on the picture show or hide the on-screen keyboard. Fingers that move still scroll. With a keyboard attached to this \(device), nothing changes."
+    }
 
     /// What each gesture does on the Mac, and what the row does as an accessibility action: its one
     /// gesture, or, for the Spaces, one action each way (natural direction: a swipe left brings the
