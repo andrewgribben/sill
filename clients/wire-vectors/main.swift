@@ -74,14 +74,14 @@ add("viewport.scale", "Viewport", .viewport, Viewport(width: 1180.5, height: 820
 add("viewport.noScale", "Viewport", .viewport, Viewport(width: 800, height: 600, scale: nil, fps: 60))
 add("clientStats", "ClientStats", .clientStats, ClientStats(fps: 59, frameAgeMs: 9, rttMs: 7, device: "Windows (DESKTOP-1)", frameAgeMaxMs: 24, rttMaxMs: -1))
 add("clientStats.old", "ClientStats", .clientStats, ClientStats(fps: 0, frameAgeMs: -1, rttMs: -1, device: "Pixel 9"))
-let settings = StreamSettings(maxFPS: 120, bitrate: 40_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: true, directWireless: false)
+let settings = StreamSettings(maxFPS: 120, bitrate: 40_000_000, captureScale: 2, prioritizeSpeed: false, virtualDisplay: true, directWireless: false, sendAudio: nil)
 add("hostSettings.full", "HostSettingsState", .hostSettings, HostSettingsState(
     settings: settings, persistent: true, virtualDisplayAvailable: true, virtualDisplayNote: "Needs Screen Recording",
     softwareEncoder: false, stream: RunningStream(width: 3024, height: 1964, fps: 60, mbps: 40, onVirtualDisplay: false), answering: 3,
     away: AwayQuality(homeBitrate: 40_000_000, homeCaptureScale: 2, awayBitrate: 4_000_000, awayCaptureScale: 1, thisConnectionAway: true, awayRunning: true),
     link: LinkReport(state: "behind", withheldPerSecond: 52, bitrate: 40_000_000, carriedKbps: 6400, suggestedBitrate: 4_000_000, suggestedCaptureScale: 1)))
 add("hostSettings.minimal", "HostSettingsState", .hostSettings, HostSettingsState(
-    settings: StreamSettings(maxFPS: 60, bitrate: 15_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: false, directWireless: nil),
+    settings: StreamSettings(maxFPS: 60, bitrate: 15_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: false, directWireless: nil, sendAudio: nil),
     persistent: false, virtualDisplayAvailable: false, softwareEncoder: true))
 add("changeSettings", "HostSettingsChange", .changeSettings, HostSettingsChange(token: 7, bitrate: 25_000_000))
 add("changeSettings.all", "HostSettingsChange", .changeSettings, HostSettingsChange(token: 8, maxFPS: 60, bitrate: 8_000_000, captureScale: 1, prioritizeSpeed: true, virtualDisplay: false, directWireless: true))

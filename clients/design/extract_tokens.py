@@ -143,7 +143,7 @@ ANCHORED = [
     # The stream panel.
     ("panelRadius", "StreamScreen.swift", r"private var streamShape: RoundedRectangle \{ RoundedRectangle\(cornerRadius: ([\d.]+)", "the stream panel's corners"),
     ("panelStrokeAlpha", "StreamScreen.swift", r"streamShape\.strokeBorder\(Color\.white\.opacity\(([\d.]+)\)", "the stream panel's white hairline"),
-    ("panelInset", "StreamScreen.swift", r"\.tourTarget\(\.stream\)\n\s*\.padding\(([\d.]+)\)", "the stream panel inside the screen below the bar"),
+    ("panelInset", "StreamScreen.swift", r"\.tourTarget\(\.stream\)\n\s*\.padding\((?:filled \? 0 : )?([\d.]+)\)", "the stream panel inside the screen below the bar"),
     ("viewportDebounce", "StreamScreen.swift", r"\.onChange\(of: panelSize\) \{ _, _ in sendViewport\(after: ([\d.]+)\) \}", "seconds a new panel size or text scale waits before it is sent to the Mac"),
     # The dim under the drawer.
     ("dimAlpha", "StreamScreen.swift", r"Color\.black\.opacity\(([\d.]+)\)\n\s*\.contentShape", "the black over the stream while the drawer is open"),

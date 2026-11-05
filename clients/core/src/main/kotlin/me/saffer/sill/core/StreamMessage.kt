@@ -40,6 +40,8 @@ object Kind {
     const val FETCH_MENU = 27
     const val GESTURE = 28
     const val CLIPBOARD = 32
+    const val AUDIO = 43
+    const val KEYFRAME_REQUEST = 44
 
     /** Every kind this build knows, by its name in StreamMessage.swift (the vectors' `kinds`). */
     val names: Map<Int, String> = mapOf(
@@ -48,7 +50,7 @@ object Kind {
         12 to "clientStats", 13 to "tick", 14 to "cursorShape", 15 to "windowCommand", 16 to "hostSettings",
         17 to "changeSettings", 18 to "macInfo", 19 to "pairRequest", 20 to "pairResult", 21 to "pairingWanted",
         22 to "goodbye", 23 to "hello", 24 to "macMenu", 25 to "pressMenuItem", 26 to "macPointer",
-        27 to "fetchMenu", 28 to "gesture", 32 to "clipboard",
+        27 to "fetchMenu", 28 to "gesture", 32 to "clipboard", 43 to "audio", 44 to "keyframeRequest",
     )
 }
 
