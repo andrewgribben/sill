@@ -52,6 +52,11 @@ add("windowList.full", "WindowList", .windowList, WindowList(
     active: .window(4242), launchID: "5D1C2B6A-0F3E-4C55-9A61-2C1D7E8F9A0B", hostVersion: "0.5.1", protocol: 1, gestures: 1, clipboard: 1))
 add("windowList.minimal", "WindowList", .windowList, WindowList(macName: "Mac", windows: [], active: .none))
 add("windowList.desktop", "WindowList", .windowList, WindowList(macName: "Mac", windows: [window], active: .desktop, protocol: 1))
+var twoDisplays = WindowList(macName: "Mac", windows: [window], active: .desktop, protocol: 1)
+twoDisplays.displays = [DisplayInfo(id: 1, name: "Built-in Retina Display", width: 1512, height: 982),
+                        DisplayInfo(id: 4294967295, name: "DELL U2720Q", width: 2560, height: 1440)]
+twoDisplays.display = 4294967295
+add("windowList.displays", "WindowList", .windowList, twoDisplays)
 add("source.none", "StreamSource", .selectSource, StreamSource.none)
 add("source.desktop", "StreamSource", .selectSource, StreamSource.desktop)
 add("source.window", "StreamSource", .selectSource, StreamSource.window(4294967295))

@@ -280,6 +280,16 @@ class SillSession(
     private fun send(m: StreamMessage) { if (!ended.get()) outbox.add(m) }
 
     fun select(source: StreamSource) { synchronized(inputLock) { userChoices++ }; send(StreamMessage.json(Kind.SELECT_SOURCE, source.toJson())) }
+
+    /** The Desktop button: the Desktop, or, while it shows and the Mac has more than one display, the next one. */
+    fun desktopPressed() {
+        val l = windowList
+        val displays = l?.displays.orEmpty()
+        if (l?.active != StreamSource.Desktop || displays.size < 2) return select(StreamSource.Desktop)
+        val i = displays.indexOfFirst { it.id == l.display }.coerceAtLeast(0)
+        synchronized(inputLock) { userChoices++ }
+        send(StreamMessage.json(Kind.SELECT_SOURCE, DisplayInfo.pick(displays[(i + 1) % displays.size].id)))
+    }
     fun launch(bundleID: String) { synchronized(inputLock) { userChoices++ }; send(StreamMessage.json(Kind.LAUNCH_APP, LaunchApp(bundleID).toJson())) }
     fun windowCommand(id: Long, action: String) = send(StreamMessage.json(Kind.WINDOW_COMMAND, WindowCommand(id, action).toJson()))
 

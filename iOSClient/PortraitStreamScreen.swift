@@ -573,8 +573,9 @@ struct PortraitStreamScreen: View {
 
     private func desktopButton(width: CGFloat? = nil) -> some View {
         barButton(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop", width: width,
-                  accessibilityLabel: "Show the full Mac desktop",
-                  action: { client.select(.desktop) })
+                  accessibilityLabel: client.desktopButtonLabel,
+                  action: { client.desktopPressed() })
+            .contextMenu { DisplayChoices(client: client) }
     }
 
     /// Leave's old slot: Disconnect is the Settings panel's pinned last row now.

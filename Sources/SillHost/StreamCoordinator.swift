@@ -1172,6 +1172,13 @@ package final class StreamCoordinator {
         switch message.kind {
         case .selectSource:
             guard let source = Wire.decode(StreamSource.self, from: message.payload) else { return }
+            // The Desktop of one display (DesktopPick). shortcut: one choice for every device and window,
+            // per connection if two devices want different displays at once.
+            if source == .desktop, let id = DesktopPick.display(in: message.payload),
+               catalog.displays.contains(where: { $0.displayID == id }), id != catalog.display?.displayID {
+                catalog.desktopDisplayID = id
+                await catalog.refreshWindows()          // `display` is the picked one from here
+            }
             if let lane = lanes[ObjectIdentifier(connection)] {
                 if case .window = source { gestureChords.forget() }
                 await lane.select(source, knobs: knobsForLane(fps: lane.askedFPS), bringForward: true)
@@ -3428,6 +3435,9 @@ package final class StreamCoordinator {
         // This host repeats a device's held key (KeyRepeat), so a device sends it a hardware keyboard's
         // characters as keys.
         list.keyRepeat = KeyRepeat.generation
+        // More than one display: which the Desktop can show, and which it shows.
+        let displays = catalog.displayInfos
+        if !displays.isEmpty { list.displays = displays; list.display = catalog.display?.displayID }
         // A locked Mac's list: no windows, no clipboard, `locked`, and off console `offConsole`
         // (LockPolicy); unlocked, as it is, byte for byte. Which went last, for `lockChanged`.
         let reading = lockReading

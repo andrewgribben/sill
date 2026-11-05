@@ -675,6 +675,13 @@
       "type" : "WindowList"
     },
     {
+      "json" : "{\"windows\":[{\"appName\":\"Notes\",\"title\":\"Notes — Shopping “list”\",\"bundleID\":\"com.apple.Notes\",\"width\":1200,\"height\":800,\"id\":4242}],\"protocol\":1,\"displays\":[{\"height\":982,\"width\":1512,\"name\":\"Built-in Retina Display\",\"id\":1},{\"height\":1440,\"width\":2560,\"name\":\"DELL U2720Q\",\"id\":4294967295}],\"macName\":\"Mac\",\"display\":4294967295,\"active\":{\"desktop\":{}}}",
+      "kind" : 2,
+      "name" : "windowList.displays",
+      "sorted" : "{\"active\":{\"desktop\":{}},\"display\":4294967295,\"displays\":[{\"height\":982,\"id\":1,\"name\":\"Built-in Retina Display\",\"width\":1512},{\"height\":1440,\"id\":4294967295,\"name\":\"DELL U2720Q\",\"width\":2560}],\"macName\":\"Mac\",\"protocol\":1,\"windows\":[{\"appName\":\"Notes\",\"bundleID\":\"com.apple.Notes\",\"height\":800,\"id\":4242,\"title\":\"Notes — Shopping “list”\",\"width\":1200}]}",
+      "type" : "WindowList"
+    },
+    {
       "json" : "{\"none\":{}}",
       "kind" : 6,
       "name" : "source.none",

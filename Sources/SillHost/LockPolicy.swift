@@ -421,6 +421,8 @@ enum LockPolicy {
         var l = list
         l.windows = []
         l.clipboard = nil
+        l.displays = nil
+        l.display = nil
         l.locked = true
         l.offConsole = r == .offConsole ? true : nil
         return l
