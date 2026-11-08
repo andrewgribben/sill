@@ -22,6 +22,27 @@ public struct WindowInfo: Codable, Hashable, Identifiable {
     }
 }
 
+/// One of the Mac's displays (`WindowList.displays`): its CGDirectDisplayID and the name macOS gives it.
+public struct DisplayInfo: Codable, Hashable, Identifiable {
+    public var id: UInt32
+    public var name: String
+    public var width: Int      // points
+    public var height: Int
+
+    public init(id: UInt32, name: String, width: Int, height: Int) {
+        self.id = id; self.name = name; self.width = width; self.height = height
+    }
+}
+
+/// Kind 6's payload for the Desktop of one display: `{"desktop":{"display":id}}`. A host before
+/// 2026-11-05 decodes it as `StreamSource.desktop` (the extra key is ignored) and shows its main
+/// display; a later one reads the display from it too (`display(in:)`).
+public enum DesktopPick {
+    private struct Payload: Codable { struct Inner: Codable { var display: UInt32? }; var desktop: Inner }
+    public static func encode(display: UInt32) -> Data { Wire.encode(Payload(desktop: .init(display: display))) }
+    public static func display(in payload: Data) -> UInt32? { Wire.decode(Payload.self, from: payload)?.desktop.display }
+}
+
 /// An installed app, for the drawer's "All apps" section.
 public struct AppInfo: Codable, Hashable, Identifiable {
     public var id: String { bundleID }
@@ -79,6 +100,12 @@ public struct WindowList: Codable {
     /// login window, or none), left out while its own screen is locked. A device words its cover by it:
     /// nothing typed reaches the Mac then (`LockedMac.Why`).
     public var offConsole: Bool?
+    /// The Mac's displays the Desktop can show, the main one first, only while it has more than one.
+    /// Nil from a Mac with one display and from every host before 2026-11-05, whose Desktop is its main
+    /// display. Set after the initializer, as `keyRepeat`.
+    public var displays: [DisplayInfo]?
+    /// With `displays`: the one the Desktop shows (`DisplayInfo.id`).
+    public var display: UInt32?
 
     public init(macName: String, windows: [WindowInfo], active: StreamSource, launchID: String? = nil,
                 hostVersion: String? = nil, protocol: Int? = nil, gestures: Int? = nil, clipboard: Int? = nil) {

@@ -229,6 +229,9 @@ final class StreamClient: ObservableObject {
     // Switcher catalog, as the host sends it. Published on main.
     @Published var macName = ""
     @Published var windows: [WindowInfo] = []          // front to back, in the host's order
+    /// The Mac's displays the Desktop can show (`WindowList.displays`), and the one it shows; empty with one.
+    @Published private(set) var displays: [DisplayInfo] = []
+    @Published private(set) var desktopDisplay: UInt32?
     /// The device's own arrangement of the bar (press, hold and drag), persisted per Mac. Windows
     /// the user has not arranged follow in the host's order.
     @Published private(set) var windowOrder: [UInt32] = []
@@ -3566,6 +3569,8 @@ final class StreamClient: ObservableObject {
         hostProtocol = nil
         hostGestures = nil
         hostKeyRepeat = nil
+        displays = []
+        desktopDisplay = nil
         remoteRoute = nil
         macInfo = nil
         macInfoSaved = false
@@ -3661,6 +3666,28 @@ final class StreamClient: ObservableObject {
     func select(_ source: StreamSource) {
         noteAction()
         request(source)
+    }
+
+    /// The Desktop of one of the Mac's displays (`displays`): a pick, as `select`.
+    func selectDesktop(display: UInt32) {
+        noteAction()
+        choicesSent += 1
+        onCaretMayMove?()
+        sendAfterInput(.selectSource, DesktopPick.encode(display: display))
+    }
+
+    /// The Desktop button: the Desktop, or, while it shows and the Mac has more than one display, the next one.
+    func desktopPressed() {
+        guard active == .desktop, displays.count > 1 else { select(.desktop); return }
+        let i = displays.firstIndex { $0.id == desktopDisplay } ?? 0
+        selectDesktop(display: displays[(i + 1) % displays.count].id)
+    }
+
+    /// What the Desktop button says to VoiceOver.
+    var desktopButtonLabel: String {
+        guard active == .desktop, displays.count > 1 else { return "Show the full Mac desktop" }
+        let i = displays.firstIndex { $0.id == desktopDisplay } ?? 0
+        return "Show the next display, \(displays[(i + 1) % displays.count].name)"
     }
 
     /// Asks the host to stream this source: the person's pick (`select`), or this device's own
@@ -4255,6 +4282,8 @@ final class StreamClient: ObservableObject {
                 let previous = self.active
                 self.windows = list.windows
                 self.active = list.active
+                self.displays = list.displays ?? []
+                self.desktopDisplay = list.display
                 // Forget thumbnails for windows that are gone.
                 let live = Set(list.windows.map(\.id))
                 self.thumbnails = self.thumbnails.filter { live.contains($0.key) }

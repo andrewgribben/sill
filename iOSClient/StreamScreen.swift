@@ -1564,8 +1564,9 @@ private struct TopBar: View {
                 .tourTarget(.keyboard)
 
             button(open: client.active == .desktop, symbol: "desktopcomputer", label: "Desktop",
-                   accessibilityLabel: "Show the full Mac desktop",
-                   action: { client.select(.desktop) })
+                   accessibilityLabel: client.desktopButtonLabel,
+                   action: { client.desktopPressed() })
+                .contextMenu { DisplayChoices(client: client) }
                 .opacity(scaleOpen ? 0 : 1)
                 .allowsHitTesting(!scaleOpen)
 
@@ -1596,6 +1597,23 @@ private struct TopBar: View {
                 Text(label)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(open ? Palette.accent : Palette.barLabel)
+            }
+        }
+    }
+}
+
+/// The Desktop button's menu with more than one display: each by name, the one showing ticked.
+struct DisplayChoices: View {
+    @ObservedObject var client: StreamClient
+
+    var body: some View {
+        ForEach(client.displays) { d in
+            Button { client.selectDesktop(display: d.id) } label: {
+                if client.active == .desktop && d.id == client.desktopDisplay {
+                    Label(d.name, systemImage: "checkmark")
+                } else {
+                    Text(d.name)
+                }
             }
         }
     }

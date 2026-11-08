@@ -65,13 +65,27 @@ data class AppInfo(val name: String, val bundleID: String) : WirePayload {
 data class WindowList(
     val macName: String, val windows: List<WindowInfo>, val active: StreamSource, val launchID: String? = null,
     val hostVersion: String? = null, val protocol: Int? = null, val gestures: Int? = null, val clipboard: Int? = null,
+    /** The Mac's displays the Desktop can show, only with more than one, and the one it shows. */
+    val displays: List<DisplayInfo>? = null, val display: Long? = null,
 ) : WirePayload {
     override fun toJson() = obj("macName" to macName, "windows" to windows.map { it.toJson() }, "active" to active.toJson(),
-        "launchID" to launchID, "hostVersion" to hostVersion, "protocol" to protocol, "gestures" to gestures, "clipboard" to clipboard)
+        "launchID" to launchID, "hostVersion" to hostVersion, "protocol" to protocol, "gestures" to gestures, "clipboard" to clipboard,
+        "displays" to displays?.map { it.toJson() }, "display" to display)
     companion object {
         fun fromJson(o: JsonObj) = WindowList(o.reqString("macName"), o.reqObjects("windows", WindowInfo::fromJson),
             StreamSource.fromJson(o.reqObj("active")), o.optString("launchID"), o.optString("hostVersion"), o.optInt("protocol"),
-            o.optInt("gestures"), o.optInt("clipboard"))
+            o.optInt("gestures"), o.optInt("clipboard"),
+            o.optObjects("displays", DisplayInfo::fromJson), o.optLong("display"))
+    }
+}
+
+/** One of the Mac's displays (`WindowList.displays`). */
+data class DisplayInfo(val id: Long, val name: String, val width: Int, val height: Int) : WirePayload {
+    override fun toJson() = obj("id" to id, "name" to name, "width" to width, "height" to height)
+    companion object {
+        fun fromJson(o: JsonObj) = DisplayInfo(o.reqLong("id"), o.reqString("name"), o.reqInt("width"), o.reqInt("height"))
+        /** Kind 6 for the Desktop of one display; a host before it reads the Desktop of its main display. */
+        fun pick(display: Long) = obj("desktop" to obj("display" to display))
     }
 }
 

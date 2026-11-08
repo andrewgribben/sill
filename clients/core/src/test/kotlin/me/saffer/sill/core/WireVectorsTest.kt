@@ -200,6 +200,9 @@ class WireVectorsTest {
         try { InputEvent.fromJson(JsonObj.parse("""{"pointer":{"_0":"middleDown","x":0,"y":0}}""".encodeToByteArray())); fail() } catch (_: JsonException) {}
         // Integers stay integers: 4294967295 and 2^53+1 are exact.
         assertEquals(StreamSource.Window(4294967295), StreamSource.fromJson(JsonObj.parse("""{"window":{"_0":4294967295}}""".encodeToByteArray())))
+        // The Desktop of one display: the Mac's own decoder reads it as the Desktop (Tests/checks/protocol).
+        assertEquals("""{"desktop":{"display":2}}""", Json.bytes(DisplayInfo.pick(2)).decodeToString())
+        assertEquals(StreamSource.Desktop, StreamSource.fromJson(JsonObj.parse(Json.bytes(DisplayInfo.pick(2)))))
         assertEquals(9007199254740993L, JsonObj.parse("""{"n":9007199254740993}""".encodeToByteArray()).reqLong("n"))
         assertNotNull(Json.write(mapOf("d" to 0.1, "i" to 2.0, "e" to 1e-7)).let { assertEquals("""{"d":0.1,"i":2,"e":1.0E-7}""", it) })
     }

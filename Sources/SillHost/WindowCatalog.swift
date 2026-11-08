@@ -20,6 +20,11 @@ final class WindowCatalog {
     private(set) var windows: [SCWindow] = []
     private(set) var infos: [WindowInfo] = []
     private(set) var display: SCDisplay?
+    /// Every display the Desktop can show, the main one first; the virtual display is never one.
+    private(set) var displays: [SCDisplay] = []
+    /// The display a device picked for the Desktop (`DesktopPick`). Nil, or one no longer connected, is
+    /// the usual rule below.
+    var desktopDisplayID: CGDirectDisplayID?
     private(set) var installedApps: [AppInfo] = []
     /// This process as ScreenCaptureKit lists it, from the last look: the Desktop stream leaves it
     /// out, so Sill's own windows (the pairing code above all) never reach a device. Nil when it
@@ -129,6 +134,18 @@ final class WindowCatalog {
     /// on-screen there (unverified), it is fetched from the full window list so its tile stays in
     /// the client's bar and the coordinator can still find it.
     var stagedWindowID: CGWindowID?
+
+    /// The displays for the window list (`WindowList.displays`), named as System Settings names them;
+    /// empty with only one, where the Desktop needs no choice.
+    var displayInfos: [DisplayInfo] {
+        guard displays.count > 1 else { return [] }
+        let names = Dictionary(NSScreen.screens.compactMap { s in
+            (s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber).map { ($0.uint32Value, s.localizedName) }
+        }, uniquingKeysWith: { a, _ in a })
+        return displays.enumerated().map { i, d in
+            DisplayInfo(id: d.displayID, name: names[d.displayID] ?? "Display \(i + 1)", width: d.width, height: d.height)
+        }
+    }
 
     /// Windows AppKit and SwiftUI make for themselves when a display appears ("LayerProbeParent":
     /// an off-screen window that probes layer backing on the new screen). They carry the app's
@@ -305,9 +322,14 @@ final class WindowCatalog {
         appliedSeq = seq
         lookedAt = .now
         ownApplication = content.applications.first { $0.processID == Self.ownPID }
-        display = preferMainDisplay
-            ? (content.displays.first { $0.displayID == CGMainDisplayID() } ?? content.displays.first)
-            : content.displays.first
+        let main = CGMainDisplayID()
+        displays = content.displays
+            .filter { CGDisplayVendorNumber($0.displayID) != VirtualStage.vendorID }
+            .sorted { ($0.displayID == main ? 0 : 1) < ($1.displayID == main ? 0 : 1) }
+        display = displays.first { $0.displayID == desktopDisplayID }
+            ?? (preferMainDisplay
+                ? (content.displays.first { $0.displayID == main } ?? content.displays.first)
+                : content.displays.first)
         var visible = content.windows.filter { w in
             guard let app = w.owningApplication, !app.applicationName.isEmpty else { return false }
             return w.windowLayer == 0                                  // drops widgets, wallpaper, backstop

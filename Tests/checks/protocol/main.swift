@@ -648,5 +648,18 @@ check("text scale: not while the Desktop streams", !TextScale.selectable(streami
 check("text scale: not while nothing streams", !TextScale.selectable(streaming: .none))
 check("text scale: VoiceOver hears a dimmed Aa is for a window", TextScale.unavailableHint == "Available for a window.")
 
+// The Desktop of one display (DesktopPick, WindowList.displays): an older host reads it as the Desktop.
+let desktopPick = DesktopPick.encode(display: 7)
+check("desktop pick: the display", DesktopPick.display(in: desktopPick) == 7)
+check("desktop pick: a host before it reads the Desktop", Wire.decode(StreamSource.self, from: desktopPick) == .desktop)
+check("desktop pick: the plain Desktop names no display", DesktopPick.display(in: Wire.encode(StreamSource.desktop)) == nil)
+check("desktop pick: a window names no display", DesktopPick.display(in: Wire.encode(StreamSource.window(7))) == nil)
+var twoDisplays = WindowList(macName: "M", windows: [], active: .desktop)
+twoDisplays.displays = [DisplayInfo(id: 1, name: "Built-in", width: 1512, height: 982), DisplayInfo(id: 2, name: "DELL", width: 2560, height: 1440)]
+twoDisplays.display = 2
+let listBack = Wire.decode(WindowList.self, from: Wire.encode(twoDisplays))
+check("window list: the displays and the one shown round-trip", listBack?.displays == twoDisplays.displays && listBack?.display == 2)
+check("window list: one display says nothing", !String(decoding: Wire.encode(WindowList(macName: "M", windows: [], active: .desktop)), as: UTF8.self).contains("display"))
+
 print(fails == 0 ? "ALL PASS (\(passes) checks)" : "\(fails) FAILED of \(passes + fails)")
 exit(Int32(min(fails, 100)))

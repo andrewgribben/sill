@@ -286,7 +286,7 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
         for (e in effects) when (e) {
             is StreamUi.Effect.Keyboard -> setIme(e.shown)
             StreamUi.Effect.SendViewport -> scheduleViewport()
-            StreamUi.Effect.SelectDesktop -> session?.select(StreamSource.Desktop)
+            StreamUi.Effect.SelectDesktop -> session?.desktopPressed()
         }
         apps.open = s.drawerOpen
         apps.contentDescription = if (s.drawerOpen) Copy.closeAppList else Copy.openAppList
