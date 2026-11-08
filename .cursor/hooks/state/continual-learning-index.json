@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "updatedAt": 1793087735.366154,
+  "transcripts": {
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/6acfdc11-3828-42d2-a5f2-0d390ebced31/6acfdc11-3828-42d2-a5f2-0d390ebced31.jsonl": {
+      "mtime": 1793087546.250889,
+      "size": 5541
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/6acfdc11-3828-42d2-a5f2-0d390ebced31/subagents/487844c6-3b0e-4908-b164-2d9e478dfcb6.jsonl": {
+      "mtime": 1793087734.2082217,
+      "size": 13171
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/8b90104e-2034-44ed-a480-ecd9ca4ed3cd.jsonl": {
+      "mtime": 1793025303.2260854,
+      "size": 410949
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/subagents/46aba342-0a0e-4d2f-af4b-ef36d4fdeeab.jsonl": {
+      "mtime": 1793022452.9672825,
+      "size": 12741
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/compaction/segment_003.md": {
+      "mtime": 1793018905.7390277,
+      "size": 810871
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/compaction/segment_007.md": {
+      "mtime": 1793024814.797958,
+      "size": 844424
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/compaction/segment_006.md": {
+      "mtime": 1793022879.886726,
+      "size": 844566
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/compaction/segment_002.md": {
+      "mtime": 1793018296.3398662,
+      "size": 806685
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/compaction/INDEX.md": {
+      "mtime": 1793024814.9136934,
+      "size": 1198
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/compaction/segment_005.md": {
+      "mtime": 1793020510.367968,
+      "size": 878074
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/compaction/segment_001.md": {
+      "mtime": 1793017516.9785993,
+      "size": 798943
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/compaction/segment_000.md": {
+      "mtime": 1793009835.4415922,
+      "size": 781812
+    },
+    "/Users/grib/.cursor/projects/Volumes-External-Development-Personal-sill/agent-transcripts/8b90104e-2034-44ed-a480-ecd9ca4ed3cd/compaction/segment_004.md": {
+      "mtime": 1793019577.8511248,
+      "size": 800347
+    }
+  }
+}

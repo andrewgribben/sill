@@ -111,6 +111,13 @@ final class WindowCatalog {
     /// The window being streamed, if the coordinator tells us. Its thumbnail refreshes every pass
     /// because its contents are the ones changing. Nil is fine: it is then treated like any other.
     var activeWindowID: UInt32?
+    /// A same-app, non-document window appeared or disappeared while one window is streamed.
+    var onSiblingWindow: ((UInt32?) -> Void)?
+    private var followedSiblingID: UInt32?
+    /// A fresh pick (manual or a restart) makes any followed sibling's window ID stale: the next
+    /// poll must not match it against the new active window's siblings. Silent — the coordinator
+    /// already knows its own pick is the reason, so this never calls `onSiblingWindow`.
+    func forgetSiblingFollow() { followedSiblingID = nil }
 
     /// `--virtual-display`: the Desktop source must capture the Mac's real main display, never the
     /// virtual one. `SCShareableContent.displays` order is not guaranteed once a second display
@@ -322,12 +329,32 @@ final class WindowCatalog {
                        width: Int(w.frame.width), height: Int(w.frame.height))
         }
         windows = ordered
+        updateSiblingFollow(from: content.windows)
         Stats.shared.windowCount = ordered.count
         for w in ordered { announceIconIfNeeded(for: w.owningApplication) }
         if newInfos != infos {
             infos = newInfos
             onWindowsChanged?(newInfos)
         }
+    }
+
+    private func updateSiblingFollow(from allWindows: [SCWindow]) {
+        guard let activeWindowID, let active = allWindows.first(where: { $0.windowID == activeWindowID }),
+              let pid = active.owningApplication?.processID else {
+            if followedSiblingID != nil { followedSiblingID = nil; onSiblingWindow?(nil) }
+            return
+        }
+        if let followedSiblingID {
+            if allWindows.contains(where: { $0.windowID == followedSiblingID }) { return }
+            self.followedSiblingID = nil
+            onSiblingWindow?(nil)
+            return
+        }
+        guard let sibling = allWindows.first(where: {
+            $0.windowID != activeWindowID && $0.windowLayer != 0 && $0.owningApplication?.processID == pid
+        }) else { return }
+        followedSiblingID = sibling.windowID
+        onSiblingWindow?(sibling.windowID)
     }
 
     /// Thumbnail cadence, per window: every pass (2 s) if its `WindowInfo` changed since its last
