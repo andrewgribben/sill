@@ -36,7 +36,9 @@ object Win32 {
     private val setForegroundWindow by lazy { fn(user32, "SetForegroundWindow", FunctionDescriptor.of(JAVA_INT, ADDRESS)) }
     private val showWindow by lazy { fn(user32, "ShowWindow", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT)) }
     private val keybdEvent by lazy { fn(user32, "keybd_event", FunctionDescriptor.ofVoid(JAVA_BYTE, JAVA_BYTE, JAVA_INT, JAVA_LONG)) }
-    private val mouseEvent by lazy { fn(user32, "mouse_event", FunctionDescriptor.ofVoid(JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_LONG)) }
+    private val getCursorPos by lazy { fn(user32, "GetCursorPos", FunctionDescriptor.of(JAVA_INT, ADDRESS)) }
+    private val windowFromPoint by lazy { fn(user32, "WindowFromPoint", FunctionDescriptor.of(ADDRESS, JAVA_LONG)) }
+    private val postMessageW by lazy { fn(user32, "PostMessageW", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, JAVA_LONG, JAVA_LONG)) }
     private val dwmGetWindowAttribute by lazy { fn(dwmapi, "DwmGetWindowAttribute", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, ADDRESS, JAVA_INT)) }
 
     private const val GW_HWNDNEXT = 2
@@ -105,10 +107,23 @@ object Win32 {
         setForegroundWindow.invokeExact(h) as Int
     }
 
-    /** A wheel turn in 120ths of a notch, which Windows passes on whole: apps that scroll by pixels
-     * scroll smoothly. Positive is up (vertical) or right (horizontal), as WHEEL_DELTA. */
+    /** A wheel turn in 120ths of a notch, posted to the window under the pointer, so apps that scroll by
+     * pixels scroll smoothly. Positive is up (vertical) or right (horizontal), as WHEEL_DELTA. Posted, not
+     * injected: on GRIBPC an injected wheel (SendInput, Robot) never arrived (a low-level mouse hook,
+     * Deskflow's server likely, ate it) while keys did.
+     * shortcut: no MK_ modifier flags in wParam, and an app reading only raw input won't see it; upgrade
+     * with SendInput when no hook is in the way. */
     fun wheel(delta: Int, horizontal: Boolean) {
         if (!available || delta == 0) return
-        mouseEvent.invoke(if (horizontal) 0x01000 else 0x0800, 0, 0, delta, 0L)
+        Arena.ofConfined().use { a ->
+            val pt = a.allocate(JAVA_INT, 2)
+            if ((getCursorPos.invokeExact(pt) as Int) == 0) return
+            val x = pt.getAtIndex(JAVA_INT, 0); val y = pt.getAtIndex(JAVA_INT, 1)
+            val h = windowFromPoint.invokeExact((y.toLong() shl 32) or (x.toLong() and 0xffffffffL)) as MemorySegment
+            if (h.address() == 0L) return
+            val wp = (delta.toLong() and 0xffff) shl 16
+            val lp = ((y.toLong() and 0xffff) shl 16) or (x.toLong() and 0xffff)
+            postMessageW.invokeExact(h, if (horizontal) 0x020E else 0x020A, wp, lp) as Int
+        }
     }
 }
