@@ -212,6 +212,12 @@ are Swift.
   with the trackpad and keys below; open flat, the whole inner screen. It is
   checked at the Galaxy Z Fold 8's 4:3 inner screen and other Folds, Flips,
   Pixel Folds and Razrs. It uses only Android's own APIs.
+- **Sill Host for Windows** (phase 1, `clients/windows-host`) turns a Windows
+  PC into a Sill host an unmodified iPhone or iPad app can find and stream
+  from: the Mac's pairing and wire, a desktop capture through ffmpeg
+  (hevc_nvenc, falling back to software encoding), and mouse and keyboard
+  input through `java.awt.Robot`. [docs/windows-host-plan.md](docs/windows-host-plan.md)
+  says what it does and skips. Not run against a real iPhone or iPad yet.
 
 ## Tips
 
