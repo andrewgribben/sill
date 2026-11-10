@@ -1,5 +1,7 @@
 package me.saffer.sill.windows
 
+import me.saffer.sill.core.AppInfo
+import me.saffer.sill.core.AppListPayload
 import me.saffer.sill.core.Base64Url
 import me.saffer.sill.core.ClientStats
 import me.saffer.sill.core.Clipboard
@@ -12,6 +14,7 @@ import me.saffer.sill.core.Json
 import me.saffer.sill.core.JsonException
 import me.saffer.sill.core.JsonObj
 import me.saffer.sill.core.Kind
+import me.saffer.sill.core.LaunchApp
 import me.saffer.sill.core.MacId
 import me.saffer.sill.core.MacInfo
 import me.saffer.sill.core.MacInfoSignature
@@ -54,6 +57,8 @@ class HostDoor(
     private val inputSink: InputSink = RobotInputSink(),
     private val pairingLifetimeSeconds: Double = 300.0,
     private val clipboard: HostClipboard? = HostClipboard(),
+    /** The Start Menu's apps; swapped out by tests. */
+    private val appCatalog: () -> List<AppInfo> = { AppCatalog.scan() },
 ) : AutoCloseable {
     val identity get() = state.identity
     val fingerprint: ByteArray get() = identity.fingerprint
@@ -198,6 +203,10 @@ class HostDoor(
         @Volatile private var video: VideoSource? = null
         @Volatile private var videoBackedUp = false
         val received = CopyOnWriteArrayList<StreamMessage>()
+        /** The paths last sent as the app list: kind 7's trust boundary (never launch a path a
+         * device sends that was not offered). */
+        @Volatile private var lastApps: List<AppInfo> = emptyList()
+        private val launchWatcher = java.util.concurrent.atomic.AtomicReference<Thread?>(null)
 
         override fun send(c: Clipboard) = send(StreamMessage.json(Kind.CLIPBOARD, c.toJson()))
 
@@ -231,6 +240,8 @@ class HostDoor(
                     StreamSettings(60, 15_000_000, 1.0, false, false, false), persistent = true, virtualDisplayAvailable = false, softwareEncoder = false,
                 ).toJson()))
                 send(StreamMessage.json(Kind.MAC_INFO, macInfo().toJson()))
+                lastApps = appCatalog()
+                send(StreamMessage.json(Kind.APP_LIST, AppListPayload(lastApps).toJson()))
                 if (Win32.available) watcher.start()
                 while (true) {
                     val m = reader.next() ?: break
@@ -243,6 +254,7 @@ class HostDoor(
                         Kind.CLIENT_STATS -> {}
                         Kind.KEYFRAME_REQUEST -> video?.requestKeyframe()
                         Kind.CLIPBOARD -> clipboard?.receive(this, Clipboard.fromJson(JsonObj.parse(m.payload)))
+                        Kind.LAUNCH_APP -> try { launch(LaunchApp.fromJson(JsonObj.parse(m.payload))) } catch (e: Throwable) { Log.error("launch not applied: $e") }
                         Kind.HELLO -> violations.add("a second hello")
                         else -> {}
                     }
@@ -254,6 +266,7 @@ class HostDoor(
                 video?.stop()
                 videoSender.interrupt()
                 watcher.interrupt()
+                launchWatcher.get()?.interrupt()
                 try { s.close() } catch (_: IOException) {}
                 sessions.remove(this)
             }
@@ -329,6 +342,39 @@ class HostDoor(
             if (!WindowFocus.shouldAttempt(lastBringForwardAt, now)) return
             lastBringForwardAt = now
             if (Win32.windows().firstOrNull()?.id != src.id) Win32.bringForward(src.id)
+        }
+
+        /** Kind 7: validates [req.bundleID] is exactly one of the paths last sent as the app list
+         * (the trust boundary: never launch an arbitrary path a device sends), launches it, then
+         * watches for its first new top-level window and streams it, as select() would for a pick. */
+        private fun launch(req: LaunchApp) {
+            val path = lastApps.firstOrNull { it.bundleID == req.bundleID }?.bundleID
+            if (path == null) { Log.warn("launch refused: bundleID not in the last app list sent"); return }
+            val name = java.io.File(path).nameWithoutExtension
+            val before = if (Win32.available) Win32.windows().map { it.id }.toSet() else emptySet()
+            try {
+                ProcessBuilder("cmd", "/c", "start", "", path).start()
+            } catch (e: IOException) { Log.error("launch failed for $name: $e"); return }
+            Log.info("launching $name")
+            if (!Win32.available) return
+            val t = Thread({ awaitLaunchedWindow(before) }, "sill-launch").apply { isDaemon = true }
+            launchWatcher.getAndSet(t)?.interrupt()
+            t.start()
+        }
+
+        /** Polls for up to 10 s for the first top-level window not in [before]; once found, picks
+         * it exactly as a device's own pick would (bringForward and streams it). */
+        private fun awaitLaunchedWindow(before: Set<Long>) {
+            val deadline = System.nanoTime() + 10_000_000_000L
+            try {
+                while (System.nanoTime() < deadline) {
+                    Thread.sleep(300)
+                    val fresh = Win32.windows().firstOrNull { it.id !in before } ?: continue
+                    synchronized(this) { select(StreamSource.Window(fresh.id)) }
+                    return
+                }
+                Log.warn("launch: no new window appeared within 10 s")
+            } catch (_: InterruptedException) {}
         }
 
         @Synchronized private fun select(src: StreamSource) {

@@ -16,8 +16,9 @@ session messages, on the same default port, 7455.
   its `sill://pair` link.
 - Advertises `_sill._tcp.local.` over mDNS (its own small responder, not a library), the Windows PC
   named after its computer name, so the iPhone/iPad app's existing discovery finds it.
-- Serves one source, the Desktop: `WindowList` with an empty window list, `HostSettings`, a signed
-  `MacInfo`, pings answered, a keyframe request forces a fresh encoder start.
+- Serves one source, the Desktop or one window: `WindowList` with the Alt+Tab windows (see below),
+  an Apps list from the Start Menu (see below), `HostSettings`, a signed `MacInfo`, pings answered,
+  a keyframe request forces a fresh encoder start.
 - Captures the chosen monitor with ffmpeg (ddagrab + hevc_nvenc on an NVIDIA GPU, falling back to
   gdigrab + hevc_mf, then libx265), and streams it as the wire expects: parameter sets before each
   keyframe, 4-byte length-prefixed access units, non-key frames dropped when a session's send backs
@@ -34,6 +35,18 @@ session messages, on the same default port, 7455.
   sent again when it changes; a pick brings the window forward and captures its part of the screen
   (`CaptureRegion`), followed when it moves or resizes, nothing streams once it closes or minimises.
   Whatever covers the window shows (ffmpeg has no window grabber).
+- Apps list (kind 5): every `.lnk` and `.url` shortcut under `%ProgramData%` and `%APPDATA%`'s
+  `Microsoft\Windows\Start Menu\Programs`, recursively, named by file name, noise filtered by name
+  (Uninstall, Readme, Help, Documentation, Website), de-duplicated by name (the user's own Start
+  Menu wins), sorted case-insensitively, capped at 500 (`AppCatalog.kt`; `build()` is pure and has a
+  JVM test, `scan()` walks the filesystem). bundleID is the shortcut's absolute path (never leaves
+  the trust boundary beyond paired devices, who already see the screen); no icons. Sent once per
+  session, right after `MacInfo` (a rescan on each connection is enough; the Mac re-sends only on a
+  change found later, which this phase does not track). A kind 7 (LaunchApp) is refused unless its
+  bundleID is exactly one of the paths in that same list (the trust boundary: a device never gets a
+  host to run an arbitrary path), then launched with `cmd /c start "" "<path>"`; its first new
+  top-level window within 10 s (not present just before the launch) is picked and brought forward
+  like any other pick, as the Mac's `pendingLaunch` does. No icons for apps either.
 - Aa, as the Mac's host: the streamed window is sized to the device's panel ÷ its text scale, at the
   window's own DPI (an iPad's 1180×820 pt at 1x is 1475×1025 px at 125 %), kept on its monitor;
   Off, another pick, the Desktop and the session's end put it back (`WindowFit`).
