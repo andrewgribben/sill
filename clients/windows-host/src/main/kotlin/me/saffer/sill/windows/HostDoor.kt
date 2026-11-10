@@ -238,7 +238,7 @@ class HostDoor(
                     when (m.kind) {
                         Kind.PING -> send(StreamMessage(Kind.PONG, 0.0, false, m.payload))
                         Kind.SELECT_SOURCE -> select(StreamSource.fromJson(JsonObj.parse(m.payload)))
-                        Kind.INPUT -> handleInput(InputEvent.fromJson(JsonObj.parse(m.payload)))
+                        Kind.INPUT -> try { handleInput(InputEvent.fromJson(JsonObj.parse(m.payload))) } catch (e: Throwable) { Log.error("input not applied: $e") }   // one bad event never ends the session
                         Kind.VIEWPORT -> {}
                         Kind.CLIENT_STATS -> {}
                         Kind.KEYFRAME_REQUEST -> video?.requestKeyframe()
