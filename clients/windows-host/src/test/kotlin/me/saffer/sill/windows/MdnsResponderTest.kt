@@ -33,7 +33,8 @@ class MdnsResponderTest {
             val buf = ByteArray(9000)
             var sawPtr = false; var sawTxt = false; var sawA = false
             val deadline = System.nanoTime() + 3_000_000_000
-            while (!sawPtr && System.nanoTime() < deadline) {
+            // Wait for all three: a real Sill host on the LAN may answer the PTR query first.
+            while (!(sawPtr && sawTxt && sawA) && System.nanoTime() < deadline) {
                 val p = DatagramPacket(buf, buf.size)
                 try { probe.receive(p) } catch (_: java.net.SocketTimeoutException) { break }
                 val records = Dns.parseResponse(buf.copyOf(p.length)) ?: continue

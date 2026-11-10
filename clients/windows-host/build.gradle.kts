@@ -16,6 +16,8 @@ kotlin {
 
 application {
     mainClass.set("me.saffer.sill.windows.MainKt")
+    // Robot and AWT's screen bounds in physical pixels on a scaled display, as ddagrab captures them.
+    applicationDefaultJvmArgs = listOf("-Dsun.java2d.uiScale=1")
 }
 
 dependencies {

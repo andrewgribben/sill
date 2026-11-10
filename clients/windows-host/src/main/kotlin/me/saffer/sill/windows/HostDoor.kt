@@ -240,6 +240,7 @@ class HostDoor(
             } catch (_: IOException) {
             } finally {
                 video?.stop()
+                videoSender.interrupt()
                 try { s.close() } catch (_: IOException) {}
                 sessions.remove(this)
             }
@@ -275,12 +276,29 @@ class HostDoor(
             val v = videoSourceFactory(activeMonitor)
             video = v
             v.start(
-                onParams = { sets -> send(StreamMessage(Kind.PARAMETER_SETS, now(), false, sets.encoded())) },
-                onFrame = { key, au ->
-                    if (videoBackedUp && !key) return@start   // drop non-key frames while the send backs up
-                    send(StreamMessage(Kind.FRAME, now(), key, au))
-                },
+                onParams = { sets -> queueVideo(StreamMessage(Kind.PARAMETER_SETS, now(), false, sets.encoded()), true) },
+                onFrame = { key, au -> queueVideo(StreamMessage(Kind.FRAME, now(), key, au), key) },
             )
+        }
+
+        // Latency beats quality: video goes through a short queue drained by its own thread, so a slow
+        // link never stalls ffmpeg's pipe. When it fills, frames are dropped until the next keyframe,
+        // which (with its parameter sets) replaces whatever was still waiting.
+        private val videoQueue = java.util.concurrent.ArrayBlockingQueue<StreamMessage>(VIDEO_QUEUE)
+        private val videoSender = Thread({
+            try { while (true) send(videoQueue.take()) } catch (_: InterruptedException) {}
+        }, "sill-video-send").apply { isDaemon = true; start() }
+
+        // One producer (ffmpeg's reader thread). Parameter sets are never dropped; frames are.
+        internal fun queueVideo(m: StreamMessage, key: Boolean) {
+            val sets = m.kind == Kind.PARAMETER_SETS
+            if (videoBackedUp && !key && !sets) return
+            if (videoBackedUp && key && !sets) { videoQueue.removeIf { it.kind == Kind.FRAME }; videoBackedUp = false }
+            if (!videoQueue.offer(m)) {
+                videoQueue.removeIf { it.kind == Kind.FRAME }
+                videoBackedUp = sets || !key
+                if (sets || key) videoQueue.offer(m)
+            }
         }
 
         fun goodbye(g: Goodbye) { send(StreamMessage.json(Kind.GOODBYE, g.toJson())); close() }
@@ -291,5 +309,7 @@ class HostDoor(
     companion object {
         /** Sources/SillHost/HostConfig.swift's `defaultRemotePort`: the same port on both platforms. */
         const val DEFAULT_PORT = 7455
+        /** About an eighth of a second of video at 60 fps. */
+        const val VIDEO_QUEUE = 8
     }
 }

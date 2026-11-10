@@ -35,8 +35,11 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
             Log.info("ffmpeg attempt ${i + 1}/${attempts.size}: ${cmd.joinToString(" ")}")
             try {
                 val p = ProcessBuilder(cmd).redirectErrorStream(false).start()
-                process = p
                 Thread({ p.errorStream.bufferedReader().forEachLine { Log.info("ffmpeg: $it") } }, "ffmpeg-stderr").apply { isDaemon = true }.start()
+                // An encoder or grabber that can't open exits within a moment: try the next one.
+                if (p.waitFor(1500, java.util.concurrent.TimeUnit.MILLISECONDS)) { Log.warn("ffmpeg attempt ${i + 1} exited (${p.exitValue()})"); continue }
+                if (!running) { p.destroyForcibly(); return }
+                process = p
                 startReader(p)
                 return
             } catch (e: Exception) {
@@ -71,7 +74,9 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
                 }
             } catch (_: Exception) {
             } finally {
-                if (running) { Log.warn("ffmpeg's stdout ended; restarting the capture"); spawn() }
+                // The one place a capture restarts (a keyframe request only kills the process), paced so a
+                // capture that keeps failing (a locked screen) doesn't spin.
+                if (running) { Log.warn("ffmpeg's stdout ended; restarting the capture"); try { Thread.sleep(500) } catch (_: InterruptedException) {}; if (running) spawn() }
             }
         }, "ffmpeg-reader").apply { isDaemon = true; start() }
     }
@@ -83,12 +88,7 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
 
     override fun requestKeyframe() {
         Log.info("keyframe requested: restarting ffmpeg for a fresh IDR")
-        restart()
-    }
-
-    private fun restart() {
-        process?.destroyForcibly()
-        spawn()
+        process?.destroyForcibly()   // the reader sees stdout end and spawns the next one
     }
 
     override fun stop() {
@@ -102,8 +102,8 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
 
     private fun nvencCommand(exe: String) = listOf(
         exe, "-y", "-hide_banner", "-loglevel", "warning",
-        "-filter_complex", "ddagrab=output_idx=$monitorIndex,hwdownload,format=bgra",
-        "-f", "lavfi", "-i", "-",
+        // ddagrab hands D3D11 frames straight to NVENC: no copy through system memory.
+        "-init_hw_device", "d3d11va", "-filter_complex", "ddagrab=output_idx=$monitorIndex:framerate=$fps",
         "-c:v", "hevc_nvenc", "-preset", "p1", "-tune", "ull", "-bf", "0", "-delay", "0", "-zerolatency", "1",
         "-rc", "cbr", "-b:v", bitrate.toString(), "-maxrate", bitrate.toString(), "-bufsize", (bitrate / 2).toString(),
         "-g", gopSeconds2().toString(), "-r", fps.toString(), "-forced-idr", "1", "-repeat-headers", "1",
