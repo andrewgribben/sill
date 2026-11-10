@@ -106,7 +106,7 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
         "-init_hw_device", "d3d11va", "-filter_complex", "ddagrab=output_idx=$monitorIndex:framerate=$fps",
         "-c:v", "hevc_nvenc", "-preset", "p1", "-tune", "ull", "-bf", "0", "-delay", "0", "-zerolatency", "1",
         "-rc", "cbr", "-b:v", bitrate.toString(), "-maxrate", bitrate.toString(), "-bufsize", (bitrate / 2).toString(),
-        "-g", gopSeconds2().toString(), "-r", fps.toString(), "-forced-idr", "1", "-repeat-headers", "1",
+        "-g", gopSeconds2().toString(), "-r", fps.toString(), "-forced-idr", "1",
         "-f", "hevc", "-",
     )
 
