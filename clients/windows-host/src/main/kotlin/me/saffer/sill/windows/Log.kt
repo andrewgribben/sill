@@ -8,12 +8,14 @@ import java.util.Date
 /** Logs to %LOCALAPPDATA%\Sill\Sill.log and stdout (both best-effort: a log that fails never stops the host). */
 object Log {
     @Volatile private var file: PrintStream? = null
+    @Volatile var path: File? = null; private set
     private val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
 
     fun start(dir: File) {
         try {
             dir.mkdirs()
-            file = PrintStream(java.io.FileOutputStream(File(dir, "Sill.log"), true), true, "UTF-8")
+            path = File(dir, "Sill.log")
+            file = PrintStream(java.io.FileOutputStream(path!!, true), true, "UTF-8")
         } catch (e: Exception) {
             println("could not open the log file: ${e.message}")
         }

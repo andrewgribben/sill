@@ -31,7 +31,12 @@ fun main(args: Array<String>) {
     mdns.start()
     Log.info("advertising _sill._tcp.local. as '$name'")
 
+    val tray = Tray(name, Log.path ?: java.io.File(state.dir, "Sill.log"), onPair = { door.openPairing() },
+        connected = { door.sessions.mapNotNull { it.hello?.device } }, onQuit = { kotlin.system.exitProcess(0) })
+    if (!java.awt.GraphicsEnvironment.isHeadless()) tray.show()
+
     Runtime.getRuntime().addShutdownHook(Thread {
+        tray.remove()
         Log.info("shutting down")
         door.sessions.forEach { it.goodbye(me.saffer.sill.core.Goodbye(me.saffer.sill.core.Goodbye.QUIT)) }
         mdns.stop()

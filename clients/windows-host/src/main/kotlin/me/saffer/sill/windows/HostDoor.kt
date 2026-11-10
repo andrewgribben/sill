@@ -123,6 +123,9 @@ class HostDoor(
 
     private fun cancelPairing(): Unit = closeWindow()
 
+    /** The tray's Pair a Device…: the code window, for the device's Add a Mac by code or the link. */
+    fun openPairing() { openWindow() }
+
     private fun expired() = synchronized(pairingLock) { code != null && System.nanoTime() > expiresAtNanos }
 
     /** TEST ONLY: the open pairing window's code, if any. */
