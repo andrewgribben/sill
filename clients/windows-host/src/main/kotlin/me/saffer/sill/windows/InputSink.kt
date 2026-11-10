@@ -5,7 +5,8 @@ package me.saffer.sill.windows
 interface InputSink {
     fun moveTo(px: Int, py: Int)
     fun button(left: Boolean, down: Boolean)
-    fun scroll(dxPixels: Int, dyPixels: Int)
+    /** Point deltas as the device sends them (the Mac posts them as pixel wheel deltas). */
+    fun scroll(dxPoints: Double, dyPoints: Double)
     fun key(hidUsage: Int, down: Boolean, modifiers: Long)
     /** Typed text ("\n", "\t", "\u0008" arrive as those keys upstream; anything else lands here). */
     fun text(s: String)
@@ -14,7 +15,7 @@ interface InputSink {
 class RecordingInputSink : InputSink {
     data class Move(val x: Int, val y: Int)
     data class Button(val left: Boolean, val down: Boolean)
-    data class Scroll(val dx: Int, val dy: Int)
+    data class Scroll(val dx: Double, val dy: Double)
     data class Key(val hidUsage: Int, val down: Boolean, val modifiers: Long)
 
     val moves = java.util.concurrent.CopyOnWriteArrayList<Move>()
@@ -25,7 +26,7 @@ class RecordingInputSink : InputSink {
 
     override fun moveTo(px: Int, py: Int) { moves.add(Move(px, py)) }
     override fun button(left: Boolean, down: Boolean) { buttons.add(Button(left, down)) }
-    override fun scroll(dxPixels: Int, dyPixels: Int) { scrolls.add(Scroll(dxPixels, dyPixels)) }
+    override fun scroll(dxPoints: Double, dyPoints: Double) { scrolls.add(Scroll(dxPoints, dyPoints)) }
     override fun key(hidUsage: Int, down: Boolean, modifiers: Long) { keys.add(Key(hidUsage, down, modifiers)) }
     override fun text(s: String) { texts.add(s) }
 }

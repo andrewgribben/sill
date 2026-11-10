@@ -24,10 +24,14 @@ class RobotInputSink : InputSink {
         if (down) robot?.mousePress(mask) else robot?.mouseRelease(mask)
     }
 
-    override fun scroll(dxPixels: Int, dyPixels: Int) {
+    private val wheel = WheelCarry()
+
+    override fun scroll(dxPoints: Double, dyPoints: Double) {
         // Robot only scrolls vertically; a horizontal component is dropped (shortcut: Shift+wheel
         // is Windows' usual trick for horizontal scroll, not implemented in phase 1).
-        if (dyPixels != 0) robot?.mouseWheel(-(dyPixels / WHEEL_PIXELS_PER_CLICK).coerceIn(-50, 50))
+        // A device's positive dy moves the content down, which is Robot's negative (wheel away).
+        val notches = wheel.notches(dyPoints)
+        if (notches != 0) robot?.mouseWheel(-notches)
     }
 
     override fun key(hidUsage: Int, down: Boolean, modifiers: Long) {
@@ -52,7 +56,6 @@ class RobotInputSink : InputSink {
     }
 
     companion object {
-        const val WHEEL_PIXELS_PER_CLICK = 40
 
         fun monitorBounds(index: Int): java.awt.Rectangle {
             if (GraphicsEnvironment.isHeadless()) return java.awt.Rectangle(0, 0, 1920, 1080)   // tests, and SSH with no desktop session
@@ -62,5 +65,23 @@ class RobotInputSink : InputSink {
                 d.defaultConfiguration.bounds
             } catch (_: Exception) { java.awt.Rectangle(0, 0, 1920, 1080) }
         }
+    }
+}
+
+/**
+ * A device's scroll arrives as many small point deltas; Robot scrolls whole notches. The remainder
+ * carries into the next delta (as the Mac's host carries sub-point remainders), so a slow drag
+ * still scrolls. shortcut: whole notches only, so scrolling is steppy; upgrade with SendInput's
+ * fine wheel deltas (mouseData below 120), which the JDK cannot send without FFM or JNA.
+ */
+class WheelCarry(private val pointsPerNotch: Double = 40.0) {
+    private var carry = 0.0
+
+    fun notches(points: Double): Int {
+        if (!points.isFinite()) return 0
+        val exact = carry + points
+        val whole = (exact / pointsPerNotch).toInt().coerceIn(-50, 50)
+        carry = (exact - whole * pointsPerNotch).let { if (kotlin.math.abs(it) >= pointsPerNotch) 0.0 else it }   // after a clamp
+        return whole
     }
 }

@@ -260,7 +260,8 @@ class HostDoor(
                     me.saffer.sill.core.PointerAction.RIGHT_DOWN -> { inputSink.moveTo(px(e.x), py(e.y)); inputSink.button(false, true) }
                     me.saffer.sill.core.PointerAction.RIGHT_UP -> inputSink.button(false, false)
                 }
-                is InputEvent.Scroll -> inputSink.scroll((e.dx * b.width).toInt(), (e.dy * b.height).toInt())
+                // x, y say where the finger is: the wheel goes to the window under the pointer, so move it there first.
+                is InputEvent.Scroll -> { inputSink.moveTo(px(e.x), py(e.y)); inputSink.scroll(e.dx, e.dy) }
                 is InputEvent.Text -> inputSink.text(e.text)
                 is InputEvent.Key -> inputSink.key(e.hidUsage, e.down, e.modifiers)
                 is InputEvent.ScrollGesture -> {}
