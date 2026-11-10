@@ -25,7 +25,13 @@ session messages, on the same default port, 7455.
 - Applies pointer, click, scroll and keyboard input via `java.awt.Robot`, HID usages mapped to
   Windows virtual keys, the Mac's Command mapped to Ctrl and Option to Alt (Windows has no
   separate keys for them). A scroll lands under the finger, sub-notch remainders carried
-  (`WheelCarry`); sideways scroll is Shift+wheel.
+  (`WheelCarry`), in 120ths of a notch so it scrolls smoothly. The wheel is posted to the window
+  under the pointer (WM_MOUSEWHEEL, WM_MOUSEHWHEEL), not injected: on GRIBPC an injected wheel
+  (SendInput or Robot) never arrived while keys did, most likely eaten by Deskflow's server hook.
+- Window picking: the window list is Alt+Tab's windows (Win32 through Java 22's FFM, `Win32.kt`),
+  sent again when it changes; a pick brings the window forward and captures its part of the screen
+  (`CaptureRegion`), followed when it moves or resizes, nothing streams once it closes or minimises.
+  Whatever covers the window shows (ffmpeg has no window grabber).
 - The clipboard both ways (kind 32, text, 256 KB), as the Mac's HostClipboard: only what is copied
   while a device subscribes, a device's text sent on to the other devices, never logged.
 - Wakes a sleeping display and ends a screen saver before capturing (capture is refused on both).
@@ -34,8 +40,7 @@ session messages, on the same default port, 7455.
 
 ## What it skips (for later phases)
 
-Window list beyond the Desktop (multi-window) and smooth scrolling (both need Win32 calls: Java
-22's FFM or JNA, the owner's decision), audio (the device plays AAC-ELD only, which ffmpeg's
+Audio (the device plays AAC-ELD only, which ffmpeg's
 builds here cannot make, and ffmpeg has no WASAPI loopback), images on the clipboard, the Mac's
 menus, trackpad gestures, a virtual display, remote (away from home) access, and a signed
 installer. A lock screen stays black: Windows refuses its capture. DPAPI protection of the stored private key is a known
@@ -43,7 +48,8 @@ shortcut; see `HostState.kt`'s comment.
 
 ## How to run it
 
-Build: `gradlew.bat :windows-host:installDist` (from `clients/`), on the PC with JDK 21 on PATH.
+Build: `gradlew.bat :windows-host:installDist` (from `clients/`), on the PC with a JDK 22 installed (Gradle's toolchain finds it). The installed task runs the newest
+Java 22 or later it finds (Temurin 25 on GRIBPC).
 That produces `clients/windows-host/build/install/windows-host/`, runnable directly with
 `bin\windows-host.bat` (with a console window; the installed task runs `javaw`, without one).
 
