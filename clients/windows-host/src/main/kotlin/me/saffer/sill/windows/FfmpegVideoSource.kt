@@ -13,7 +13,7 @@ import java.io.File
  * costs a connection stall of a few frames; a cleaner fix (NVENC's forced-IDR API) is a later
  * upgrade once phase 1's correctness is proven.
  */
-class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, private val height: Int, private val fps: Int = 60, private val bitrate: Int = 15_000_000) : VideoSource {
+class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, private val height: Int, private val fps: Int = 60, private val bitrate: Int = 15_000_000, private val wake: () -> Unit = {}) : VideoSource {
     @Volatile private var process: Process? = null
     @Volatile private var running = false
     @Volatile private var reader: Thread? = null
@@ -27,6 +27,9 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
     }
 
     private fun spawn() {
+        // A display that sleeps (or a screen saver's own desktop) refuses capture, and a device sends no
+        // input until it has a picture: wake it as the Mac's host does when a device connects.
+        wake()
         val exe = findFfmpeg() ?: run { Log.error("ffmpeg not found on PATH or at the known WinGet install"); return }
         val attempts = listOf(
             nvencCommand(exe), mfCommand(exe), x265Command(exe),

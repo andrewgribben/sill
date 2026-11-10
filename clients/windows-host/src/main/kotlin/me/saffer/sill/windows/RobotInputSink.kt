@@ -56,6 +56,15 @@ class RobotInputSink : InputSink {
     }
 
     companion object {
+        private val wakeRobot: Robot? by lazy { try { Robot() } catch (_: Throwable) { null } }
+
+        /** Counts as user activity: wakes a sleeping display and ends a screen saver. */
+        fun wake() {
+            val r = wakeRobot ?: return
+            val at = try { java.awt.MouseInfo.getPointerInfo()?.location } catch (_: Throwable) { null } ?: return
+            r.mouseMove(at.x + 1, at.y); r.mouseMove(at.x, at.y)
+        }
+
 
         fun monitorBounds(index: Int): java.awt.Rectangle {
             if (GraphicsEnvironment.isHeadless()) return java.awt.Rectangle(0, 0, 1920, 1080)   // tests, and SSH with no desktop session

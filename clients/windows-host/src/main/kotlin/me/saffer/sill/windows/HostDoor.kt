@@ -51,7 +51,7 @@ class HostDoor(
     /** One source per connected monitor index; swapped out by tests for [FakeVideoSource]. */
     private val videoSourceFactory: (Int) -> VideoSource = { idx ->
         val b = RobotInputSink.monitorBounds(idx)
-        FfmpegVideoSource(idx, b.width, b.height)
+        FfmpegVideoSource(idx, b.width, b.height, wake = RobotInputSink::wake)
     },
     private val inputSink: InputSink = RobotInputSink(),
     private val pairingLifetimeSeconds: Double = 300.0,
