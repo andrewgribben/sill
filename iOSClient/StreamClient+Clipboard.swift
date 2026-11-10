@@ -23,6 +23,11 @@ struct ClipboardReceipt: Equatable {
     /// Its time ran out ("Didn’t reach…" shown, the chip offered again); a receipt that comes later
     /// still counts.
     var late = false
+    /// Sent by Send Copies Automatically, with no tap: its receipt presses no ⌘V and shows no note
+    /// (`clipboardReceiptCame`), and its lateness stays quiet (`clipboardReceiptLate`): the chip is
+    /// never offered while Send Copies Automatically is on, and `clipboardAutoTried` keeps it from
+    /// being tried again this session.
+    var automatic = false
 }
 
 // The clipboard, this device's side (kind 32; docs/clipboard-plan.md). ClipboardPolicy has the rules;
@@ -35,6 +40,12 @@ struct ClipboardReceipt: Equatable {
 //   reads only `changeCount` and `hasStrings`, which never ask, to offer the chip; the text is read
 //   by the system's Paste control (UIPasteControl, SwiftUI's PasteButton) when the person taps it,
 //   and counts as sent only once the Mac has read it (a ping after it comes back: the receipt).
+//   Exception, Send Copies Automatically (2026-11-10, fork, off by default): with it on, and iOS's
+//   "Allow Paste?" already turned off for Sill in the device's own Settings (the owner's doing, not
+//   this app's), a repeating check reads `UIPasteboard.general.strings` once a second while connected,
+//   Share Clipboard is on and Sill is active, and sends a new copy with no tap (`autoSends`,
+//   `checkClipboardAutomatically`). No ⌘V and no "Sent…" note for such a send: it stays quiet, as the
+//   person never asked for it; "Too long…" still shows.
 // - Paste right away (2026-10-29): with Paste on ‹Mac› Right Away on, the receipt also presses ⌘V on
 //   the Mac a moment later (ClipboardPolicy.pastesOnReceipt, `pasteDelay`), so the text lands where
 //   its cursor is. iOS has no such way back: no app pastes into another, so the Mac's text waits on
@@ -74,6 +85,15 @@ extension StreamClient {
         return ClipboardPolicy.pasteDelay
     }
 
+    /// Send Copies Automatically (2026-11-10, fork; the Settings panel's This iPad group, under Share
+    /// Clipboard and Paste on ‹Mac› Right Away): off unless turned on. With it on, and the device's own
+    /// Settings already letting Sill paste without asking, this device's copies reach the Mac with no
+    /// tap (ClipboardPolicy.autoSends). The device's own preference, never sent; read at each tick.
+    static let sendCopiesAutomaticallyKey = "Sill.sendCopiesAutomatically"
+    static var sendCopiesAutomaticallyOn: Bool {
+        UserDefaults.standard.bool(forKey: sendCopiesAutomaticallyKey)
+    }
+
     /// The clipboard's change count Sill last handled (sent, written from the Mac, the chip dismissed
     /// or timed out), kept across launches so a relaunch does not offer old text again.
     static let clipboardHandledKey = "Sill.clipboardHandled"
@@ -97,6 +117,7 @@ extension StreamClient {
             guard let self else { return }
             self.clipboardAppActive = false
             self.updateClipboardChipClock()
+            self.updateClipboardAutoTimer()
         }
         center.addObserver(forName: UIAccessibility.voiceOverStatusDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.updateClipboardChipClock()
@@ -106,15 +127,18 @@ extension StreamClient {
     // MARK: The subscription
 
     /// Each window list's `clipboard`: the subscription follows it, and a session that starts soon
-    /// after Sill became active gets the chip's look then.
+    /// after Sill became active gets the chip's look then, or Send Copies Automatically's check
+    /// instead while it is on.
     func hostClipboardChanged(_ value: Int?) {
         let took = ClipboardPolicy.hostTakes(hostClipboard)
         if hostClipboard != value { hostClipboard = value }
         updateClipboardSubscription()
+        updateClipboardAutoTimer()
         let takes = ClipboardPolicy.hostTakes(value)
         if !takes { hideClipboardChip() }
         if !took, takes, ClipboardPolicy.looksAtSessionStart(activatedAt: clipboardActivatedAt, now: uptime) {
-            lookAtClipboard(why: "the session started")
+            if Self.sendCopiesAutomaticallyOn { checkClipboardAutomatically(why: "the session started") }
+            else { lookAtClipboard(why: "the session started") }
         }
     }
 
@@ -142,7 +166,15 @@ extension StreamClient {
     /// The Settings group's switch moved.
     func clipboardSwitchChanged() {
         updateClipboardSubscription()
+        updateClipboardAutoTimer()
         if !Self.clipboardOn { hideClipboardChip() }
+    }
+
+    /// Send Copies Automatically's own switch moved (the Settings panel's This iPad group).
+    func clipboardAutoSwitchChanged() {
+        updateClipboardAutoTimer()
+        // Turned on: the chip, if one was showing, is no longer owed (ClipboardPolicy.offersChip).
+        if Self.sendCopiesAutomaticallyOn { hideClipboardChip() }
     }
 
     /// A move handed the session to its new connection (`finishMove`): the Mac keeps subscriptions per
@@ -150,6 +182,7 @@ extension StreamClient {
     func clipboardMoved() {
         clipboardSubscribed = false
         updateClipboardSubscription()
+        updateClipboardAutoTimer()
     }
 
     /// The session ended: nothing of it is kept but the handled count.
@@ -162,6 +195,8 @@ extension StreamClient {
         clipboardReceiptExpiry = nil
         clipboardPasteWork?.cancel()        // a ⌘V for this session never goes to the next
         clipboardPasteWork = nil
+        clipboardAutoTried = nil
+        updateClipboardAutoTimer()          // stops: not connected
         hideClipboardChip()
         // The next stream screen says again whether the chip shows (its onChange starts from this).
         clipboardChipOnScreen = false
@@ -189,15 +224,18 @@ extension StreamClient {
     // MARK: The chip
 
     /// Sill became active: the chip's time runs again if it shows, and the chip looks now, or at the
-    /// session's start soon after (`hostClipboardChanged`).
+    /// session's start soon after (`hostClipboardChanged`); Send Copies Automatically's check instead
+    /// while it is on, and its timer starts or stops with the app's own activation.
     func clipboardBecameActive() {
         clipboardAppActive = true
         updateClipboardChipClock()
+        updateClipboardAutoTimer()
         // The app's and its scene's notifications come together: one look.
         if let last = clipboardActivatedAt, uptime - last < 0.5 { return }
         clipboardActivatedAt = uptime
         guard ClipboardPolicy.hostTakes(hostClipboard) else { return }
-        lookAtClipboard(why: "Sill became active")
+        if Self.sendCopiesAutomaticallyOn { checkClipboardAutomatically(why: "Sill became active") }
+        else { lookAtClipboard(why: "Sill became active") }
     }
 
     /// Offers the chip when ClipboardPolicy says; reads only the change count and whether there is text.
@@ -212,7 +250,8 @@ extension StreamClient {
         // Not while a Paste waits for its receipt: the chip comes back if it never comes.
         let waiting = clipboardReceipt.map { !$0.late } ?? false
         let offer = !waiting && ClipboardPolicy.offersChip(connected: connected, hostClipboard: hostClipboard, switchOn: Self.clipboardOn,
-                                                           hasStrings: board.hasStrings, changeCount: count, handled: clipboardHandled)
+                                                           autoOn: Self.sendCopiesAutomaticallyOn, hasStrings: board.hasStrings,
+                                                           changeCount: count, handled: clipboardHandled)
         #if DEBUG
         print("clipboard: \(why): change \(count), handled \(clipboardHandled.map(String.init) ?? "none")"
               + (waiting ? ", a Paste waiting for its receipt" : "") + ": \(offer ? "the chip" : "no chip")")
@@ -222,6 +261,59 @@ extension StreamClient {
         clipboardChipShownFor = 0
         clipboardChipAnnounced = false
         updateClipboardChipClock()
+    }
+
+    // MARK: Send Copies Automatically
+
+    /// Starts or stops the once-a-second check (`checkClipboardAutomatically`) as its conditions
+    /// change: connected, the Mac takes the clipboard, Share Clipboard and Send Copies Automatically
+    /// are both on, and Sill is active. Called from the session's start and end (`hostClipboardChanged`,
+    /// `resetClipboard`), both switches, a move's new connection, and Sill's own activation.
+    func updateClipboardAutoTimer() {
+        let shouldRun = connected && ClipboardPolicy.hostTakes(hostClipboard) && Self.clipboardOn
+            && Self.sendCopiesAutomaticallyOn && clipboardAppActive
+        guard shouldRun != (clipboardAutoTimer != nil) else { return }
+        if shouldRun {
+            #if DEBUG
+            print("clipboard: Send Copies Automatically's check starts")
+            #endif
+            checkClipboardAutomatically(why: "its check started")
+            let timer = DispatchSource.makeTimerSource(queue: .main)
+            timer.schedule(deadline: .now() + 1, repeating: 1, leeway: .milliseconds(50))
+            timer.setEventHandler { [weak self] in
+                self?.checkClipboardAutomatically(why: "a tick")
+            }
+            timer.resume()
+            clipboardAutoTimer = timer
+        } else {
+            #if DEBUG
+            if clipboardAutoTimer != nil { print("clipboard: Send Copies Automatically's check stops") }
+            #endif
+            clipboardAutoTimer?.cancel()
+            clipboardAutoTimer = nil
+        }
+    }
+
+    /// The tick itself (ClipboardPolicy.autoSends): a change with text, not yet handled and not already
+    /// tried this session, goes to the Mac with no tap, through the Paste path (`sendClipboard`) but
+    /// quietly: no ⌘V and no "Sent…" note (`clipboardReceiptCame`), and no retry loop
+    /// (`clipboardAutoTried`). "Too long…" still shows, as a Paste's does.
+    func checkClipboardAutomatically(why: String) {
+        #if DEBUG
+        if mockDiscovery { return }      // the harness never reads the simulator's own clipboard
+        #endif
+        let board = UIPasteboard.general
+        let count = board.changeCount
+        let sends = ClipboardPolicy.autoSends(switchOn: Self.clipboardOn, autoOn: Self.sendCopiesAutomaticallyOn,
+                                              connected: connected, hostClipboard: hostClipboard, active: clipboardAppActive,
+                                              hasStrings: board.hasStrings, changeCount: count, handled: clipboardHandled,
+                                              tried: clipboardAutoTried)
+        guard sends else { return }
+        clipboardAutoTried = count
+        #if DEBUG
+        print("clipboard: \(why): change \(count) sent automatically")
+        #endif
+        sendClipboard(board.strings ?? [], automatic: true)
     }
 
     /// The stream screen says whether the chip itself is on screen (StreamScreen.clipboardChipOnScreen):
@@ -289,9 +381,11 @@ extension StreamClient {
 
     // MARK: Paste on the Mac
 
-    /// What the system's Paste control read on the person's tap (the chip's, or the Settings group's):
-    /// sent to the Mac, with its receipt to wait for, or "too long".
-    func sendClipboard(_ strings: [String]) {
+    /// What the system's Paste control read on the person's tap (the chip's, or the Settings group's),
+    /// or Send Copies Automatically's check (`automatic`, with no tap): sent to the Mac, with its
+    /// receipt to wait for, or "too long". An automatic send's receipt presses no ⌘V and shows no note
+    /// (`clipboardReceiptCame`); "Too long…" still shows either way.
+    func sendClipboard(_ strings: [String], automatic: Bool = false) {
         let mac = macName.isEmpty ? "the Mac" : macName
         switch ClipboardPolicy.deviceSends(strings, connected: connected, hostClipboard: hostClipboard, switchOn: Self.clipboardOn) {
         case .send(let payload):
@@ -302,7 +396,7 @@ extension StreamClient {
             send(.ping, payload: nonce)
             let count = UIPasteboard.general.changeCount
             if let text = strings.first(where: { !$0.isEmpty }) { clipboardSent = ClipboardPolicy.Sent(text: text, changeCount: count) }
-            clipboardReceipt = ClipboardReceipt(nonce: nonce, changeCount: count)
+            clipboardReceipt = ClipboardReceipt(nonce: nonce, changeCount: count, automatic: automatic)
             hideClipboardChip()
             clipboardReceiptExpiry?.cancel()
             let wait = ClipboardPolicy.receiptWait(worstRttMs: lastRttMaxMs)
@@ -310,7 +404,7 @@ extension StreamClient {
             clipboardReceiptExpiry = work
             DispatchQueue.main.asyncAfter(deadline: .now() + wait, execute: work)
             #if DEBUG
-            print("clipboard: sent \(payload.count) bytes of JSON to the Mac (change \(count)), its receipt awaited for \(wait) s")
+            print("clipboard: sent \(payload.count) bytes of JSON to the Mac (change \(count))\(automatic ? " automatically" : ""), its receipt awaited for \(wait) s")
             #endif
         case .tooLong:
             showClipboardNote(ClipboardPolicy.Copy.tooLong(mac: mac), spoken: ClipboardPolicy.Copy.tooLong(mac: mac), warning: true)
@@ -323,7 +417,8 @@ extension StreamClient {
     /// A receipt's pong (StreamClient.handle): the Mac has read the text, and the copy is dealt with.
     /// With Paste on ‹Mac› Right Away on, ⌘V follows (`pasteOnMac`) and the note says "Pasted on
     /// ‹Mac›."; else "Sent…". One that comes after its time ran out still counts, and presses nothing
-    /// (ClipboardPolicy.pastesOnReceipt).
+    /// (ClipboardPolicy.pastesOnReceipt). An automatic send's receipt (`automatic`) presses no ⌘V and
+    /// shows no note: the person never tapped Paste, so nothing announces it.
     func clipboardReceiptCame(_ payload: Data) {
         guard let receipt = clipboardReceipt, receipt.nonce == payload else { return }
         clipboardReceiptExpiry?.cancel()
@@ -332,8 +427,10 @@ extension StreamClient {
         clipboardHandled = receipt.changeCount
         hideClipboardChip()
         #if DEBUG
-        print("clipboard: the Mac has read it (its receipt" + (receipt.late ? ", after its time ran out)" : ")"))
+        print("clipboard: the Mac has read it (its receipt" + (receipt.late ? ", after its time ran out)" : ")")
+              + (receipt.automatic ? ", sent automatically: quiet" : ""))
         #endif
+        guard !receipt.automatic else { return }
         guard pastesNow(late: receipt.late) else { receiptNoted(pasted: false); return }
         pasteOnMac()
     }
@@ -388,12 +485,20 @@ extension StreamClient {
     }
 
     /// No receipt in time: "Didn’t reach…", and the copy not dealt with, so the chip offers it again (once
-    /// the note has gone) while the session lasts, and at the next look after.
+    /// the note has gone) while the session lasts, and at the next look after. An automatic send
+    /// (`automatic`) stays quiet: no note, no haptic, no chip (never offered while it is on anyway);
+    /// `clipboardAutoTried` already keeps this change count from being tried again this session.
     private func clipboardReceiptLate() {
         clipboardReceiptExpiry = nil
         guard var receipt = clipboardReceipt, !receipt.late else { return }
         receipt.late = true
         clipboardReceipt = receipt
+        guard !receipt.automatic else {
+            #if DEBUG
+            print("clipboard: an automatic send's receipt did not come in time: quiet")
+            #endif
+            return
+        }
         let mac = macName.isEmpty ? "the Mac" : macName
         showClipboardNote(ClipboardPolicy.Copy.notSent(mac: mac), spoken: ClipboardPolicy.Copy.notSent(mac: mac), warning: true)
         if UIDevice.current.userInterfaceIdiom == .phone { UINotificationFeedbackGenerator().notificationOccurred(.warning) }

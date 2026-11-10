@@ -28,7 +28,9 @@ import StreamProtocol
 /// stepper, `ThumbnailHold.key`; Three-Finger Gestures, `StreamClient.gesturesKey`), and whose gesture
 /// rows, as accessibility actions, do their gestures
 /// `StreamClient.clipboardKey`, while the Mac shares its clipboard, with Paste on ‹Mac› Right Away,
-/// `StreamClient.pasteRightAwayKey`, and the system's Paste for this device's text; Reverse
+/// `StreamClient.pasteRightAwayKey`, Send Copies Automatically, `StreamClient.sendCopiesAutomaticallyKey`
+/// (2026-11-10, fork: off by default, a copy on this device reaches the Mac with no tap), and the
+/// system's Paste for this device's text; Reverse
 /// Scrolling, `StreamClient.reverseScrollKey`; Three-Finger Gestures, `StreamClient.gesturesKey`;
 /// Pinch to Fill the Screen, `StreamClient.pinchToFillKey`, which allows a pinch on one window's
 /// picture to hide that window's bar; Double-Tap for the Keyboard, `StreamClient.keyboardDoubleTapKey`;
@@ -80,6 +82,9 @@ struct HostSettingsPanel: View {
     /// Paste on ‹Mac› Right Away (paste right away, ClipboardPolicy.pastesOnReceipt): on unless turned
     /// off, read by StreamClient+Clipboard at each receipt, never sent.
     @AppStorage(StreamClient.pasteRightAwayKey) private var pasteRightAway = true
+    /// Send Copies Automatically (2026-11-10, fork): off unless turned on, read by StreamClient+Clipboard
+    /// at each tick, device only, never sent.
+    @AppStorage(StreamClient.sendCopiesAutomaticallyKey) private var sendCopiesAutomatically = false
     /// VoiceOver is on: it keeps three-finger swipes and taps for itself, so the This iPad group says
     /// its rows do the gestures instead.
     @State private var voiceOver = HostSettingsPanel.voiceOverRunning
@@ -638,6 +643,14 @@ struct HostSettingsPanel: View {
                     .padding(.vertical, 6)          // a long Mac name takes two lines
                     .rowFrame()
                     RowDivider()
+                    // Send Copies Automatically (2026-11-10, fork): with it on, a copy on this device
+                    // reaches the Mac with no tap, about a second after it is made.
+                    Toggle(isOn: $sendCopiesAutomatically) {
+                        Text(ClipboardPolicy.Copy.autoTitle).foregroundStyle(Palette.text)
+                    }
+                    .rowFrame()
+                    .onChange(of: sendCopiesAutomatically) { _, _ in client.clipboardAutoSwitchChanged() }
+                    RowDivider()
                     ClipboardPasteRow(client: client, title: ClipboardPolicy.Copy.rowTitle(mac: mac))
                         .id(Self.clipboardRowsID)
                 }
@@ -647,7 +660,8 @@ struct HostSettingsPanel: View {
                     .padding(.bottom, -6)
                     .accessibilityHidden(true)      // announced as it came
             }
-            Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, mac: mac, device: device))
+            Footnote(text: ClipboardPolicy.Copy.footnote(on: clipboardOn, rightAway: pasteRightAway, autoOn: sendCopiesAutomatically,
+                                                         mac: mac, device: device))
         }
         Rows {
             Toggle(isOn: $reverseScroll) {

@@ -939,6 +939,12 @@ final class StreamClient: ObservableObject {
     /// A receipt's ⌘V (paste right away: ClipboardPolicy.pastesOnReceipt) during its `pasteDelay`;
     /// the session's end cancels it.
     var clipboardPasteWork: DispatchWorkItem?
+    /// Send Copies Automatically (2026-11-10, fork): the repeating check (`checkClipboardAutomatically`),
+    /// running only while ClipboardPolicy's conditions hold; nil while it does not.
+    var clipboardAutoTimer: DispatchSourceTimer?
+    /// The change count Send Copies Automatically last tried to send (sent or gave up on): never tried
+    /// again this session, so a copy whose receipt never comes is not sent in a loop.
+    var clipboardAutoTried: Int?
     /// This device's path (status, interfaces, cost), for "did it leave home since the loss".
     var pathSignature = ""
     var pathMonitor: NWPathMonitor?

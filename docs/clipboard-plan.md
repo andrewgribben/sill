@@ -806,3 +806,55 @@ transient type, 1Password's own): `markerTypes` and `HostSkip.marked` are gone f
 types are still read before any data, and Universal Clipboard's items and the host's own writes are still
 never sent. The footnote, README, the support and privacy pages and DEVELOPMENT.md no longer except them;
 the check sends each former marker like any copy and its model has no marked case.
+
+## Send copies automatically (2026-11-10, fork)
+
+The iPad never reads its own clipboard without a tap (the Paste button, or "Paste on ‹Mac›"), because
+iOS asks "Allow Paste?" for a background read. The owner wants copies to reach the Mac on their own,
+and has set iPad Settings › Apps › Sill › Paste from Other Apps to Allow himself, so Sill reading
+`UIPasteboard.general.strings` no longer asks. Send Copies Automatically (`Sill.sendCopiesAutomatically`,
+device only, never sent, off by default) is the new switch for it, in the Settings panel's This iPad
+group under Share Clipboard and Paste on ‹Mac› Right Away (shown with them, while Share Clipboard is on
+and the Mac shares its clipboard).
+
+- **The rule** (`ClipboardPolicy.autoSends`, pure): with the switch on, Share Clipboard on, connected
+  to a Mac that takes the clipboard (`hostTakes`), and Sill active, a change of this device's
+  clipboard with text (`hasStrings`), not the change count already handled and not the one already
+  tried automatically this session, is sent. "Already tried" (`tried`, `StreamClient.clipboardAutoTried`)
+  keeps a copy whose receipt never comes, or never arrives, from being sent again in a loop: it is
+  tried once a session for each change count, whatever its receipt says.
+- **The check** (`StreamClient.checkClipboardAutomatically`): once a second, by a repeating main-thread
+  `Timer` (`updateClipboardAutoTimer`, started and stopped as its conditions change: the session's
+  start and end, both switches, a move's new connection, and Sill's own activation), and once at
+  `clipboardBecameActive` or a session's start instead of offering the chip (`hostClipboardChanged`).
+  It reads `UIPasteboard.general.strings` and sends through the same path a Paste uses
+  (`sendClipboard(_:automatic:)`), so the cap, the receipt and "Too long…" all still apply.
+- **No ⌘V, no note, no haptic, no VoiceOver announcement.** An automatic send is never a Paste: its
+  receipt (`ClipboardReceipt.automatic`) presses no ⌘V and shows no "Sent…" note, so nothing
+  interrupts what the person is doing on either device. `clipboardReceiptLate` stays quiet for one
+  too (no "Didn't reach…", no chip): the copy is simply not retried for that change count this
+  session. "Too long to send…" still shows either way, as a tap's would: a copy too big to send is
+  worth knowing about.
+- **No chip while it is on.** `ClipboardPolicy.offersChip` takes a new `autoOn` parameter and never
+  offers the chip while Send Copies Automatically is on: such a device sends on its own, so the chip,
+  which exists only for the tap, is never owed. Turning the switch on hides a chip already showing.
+- **The words.** The switch, `ClipboardPolicy.Copy.autoTitle`, "Send Copies Automatically". A new
+  overload of `footnote` appends one sentence while it is on (`autoFootnoteAddition`, naming
+  `StreamClient.deviceWord`, not always "iPad"): it says the feature reads this device's clipboard by
+  itself, and names the Settings path to stop iOS asking each time (the same one the owner has
+  already used).
+- **Checks.** `Tests/checks/clipboard`: `autoSends`'s nine cases (every condition, and the loop guard
+  across two different change counts), `offersChip`'s new `autoOn` axis added to its existing sweep,
+  and the new footnote overload and words. Four new mutants in `mutants.py`: the chip offered while
+  sending automatically, an automatic send with the switch off, with Sill not active, and tried twice
+  (the loop). Verified: `Tests/checks/clipboard/run.sh` 403 checks, 0 failed; its mutants run
+  (`--mutants`) started separately, result recorded when it finishes.
+- **Build.** `xcodebuild` for the generic iOS Simulator (Debug): to verify.
+- **Untested, for Noah:** everything live (no device or simulator reachable here): the switch shown
+  and hidden with the other clipboard rows; a copy on the iPad reaching the Mac's clipboard within
+  about a second with no tap, no ⌘V, no note; "Too long…" still showing for an oversize copy made
+  automatically; the switch turned off mid-session stopping the check; the app backgrounded and
+  returned stopping and restarting the timer; a copy made while backgrounded picked up at the next
+  foreground (the check at `clipboardBecameActive`); the loop guard (a copy whose receipt never comes,
+  because the Mac's Share clipboard with devices is off, tried once and not again until the next
+  copy).

@@ -285,10 +285,11 @@ public enum ClipboardPolicy {
     /// on, when the device's clipboard has text (`hasStrings`, which never asks to paste) and its
     /// change count is not the one Sill last handled (`handled`: sent, written from the Mac, or the
     /// chip dismissed or timed out for it). Asked when Sill becomes active, and at a session's start
-    /// soon after (`looksAtSessionStart`).
-    public static func offersChip(connected: Bool, hostClipboard: Int?, switchOn: Bool, hasStrings: Bool,
+    /// soon after (`looksAtSessionStart`). Never while Send Copies Automatically is on (`autoOn`):
+    /// such a device sends on its own, with no tap, so no chip is ever owed (`autoSends`).
+    public static func offersChip(connected: Bool, hostClipboard: Int?, switchOn: Bool, autoOn: Bool, hasStrings: Bool,
                                   changeCount: Int, handled: Int?) -> Bool {
-        connected && hostTakes(hostClipboard) && switchOn && hasStrings && changeCount != handled
+        !autoOn && connected && hostTakes(hostClipboard) && switchOn && hasStrings && changeCount != handled
     }
 
     /// Whether the chip's `chipLifetime` runs now: only while the chip is on screen (nothing open over
@@ -305,6 +306,18 @@ public enum ClipboardPolicy {
     public static func looksAtSessionStart(activatedAt: Double?, now: Double) -> Bool {
         guard let activatedAt else { return false }
         return now >= activatedAt && now - activatedAt <= activationWindow
+    }
+
+    /// Send Copies Automatically (2026-11-10, fork): with this device's switch on, this preference on
+    /// (`autoOn`, off by default, device only, never sent), connected to a Mac that takes the
+    /// clipboard, and Sill active, a copy reaches the Mac with no tap. Checked about once a second
+    /// (`StreamClient.checkClipboardAutomatically`): a change the person has not yet handled
+    /// (`handled`) and has not already been tried this session (`tried`, so a copy whose receipt never
+    /// comes, or never arrives, is tried only once, never in a loop), with text (`hasStrings`).
+    public static func autoSends(switchOn: Bool, autoOn: Bool, connected: Bool, hostClipboard: Int?, active: Bool,
+                                 hasStrings: Bool, changeCount: Int, handled: Int?, tried: Int?) -> Bool {
+        switchOn && autoOn && connected && hostTakes(hostClipboard) && active && hasStrings
+            && changeCount != handled && changeCount != tried
     }
 
     public enum DeviceSend: Equatable, Sendable {
@@ -434,11 +447,28 @@ public enum ClipboardPolicy {
         public static func rowTitle(mac: String) -> String { "Paste on \(mac)" }
         /// The switch under Share Clipboard, shown while it is on.
         public static func rightAwayTitle(mac: String) -> String { "Paste on \(mac) Right Away" }
+        /// Send Copies Automatically's own switch (2026-11-10, fork), shown with the other clipboard
+        /// rows while Share Clipboard is on and the Mac shares its clipboard.
+        public static let autoTitle = "Send Copies Automatically"
+        /// Send Copies Automatically's own sentence, appended to the group's footnote while it is on:
+        /// it reads this device's clipboard by itself (unlike a tap on Paste), and how to stop iOS
+        /// asking each time (the owner's Paste from Other Apps already set to Allow makes this true).
+        public static func autoFootnoteAddition(device: String) -> String {
+            " Send Copies Automatically reads this \(device)’s clipboard by itself; to stop iOS asking"
+                + " each time, set Settings > Apps > Sill > Paste from Other Apps to Allow."
+        }
         /// The group's footnote with that switch: on, where Paste's text goes and what turning the switch
         /// off leaves; off (or Share Clipboard off), the footnote as it was.
         public static func footnote(on: Bool, rightAway: Bool, mac: String, device: String) -> String {
             guard on, rightAway else { return footnote(on: on, mac: mac, device: device) }
             return "Text you copy on \(mac) is ready to paste on this \(device). To paste on \(mac), copy text here and tap Paste: it goes where \(mac)’s cursor is. With Paste on \(mac) Right Away off, Paste only puts it on \(mac)’s clipboard."
+        }
+        /// The group's footnote with Send Copies Automatically's own sentence appended while it is on
+        /// (`autoOn`); otherwise the footnote above, unchanged.
+        public static func footnote(on: Bool, rightAway: Bool, autoOn: Bool, mac: String, device: String) -> String {
+            let base = footnote(on: on, rightAway: rightAway, mac: mac, device: device)
+            guard on, autoOn else { return base }
+            return base + autoFootnoteAddition(device: device)
         }
         public static func footnote(on: Bool, mac: String, device: String) -> String {
             on ? "Text you copy on \(mac) is ready to paste on this \(device). To paste on \(mac), copy text here, tap Paste, then press ⌘V there."

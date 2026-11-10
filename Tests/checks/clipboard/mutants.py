@@ -131,6 +131,19 @@ MUTANTS = [
     ("the Mac's footnote excepts a password manager's copies again", P,
      "with Paste becomes this Mac’s.\"", "with Paste becomes this Mac’s. Copies a password manager marks as concealed stay on this Mac.\""),
     ("the subtitle without the key", P, 'public static let chipSubtitle = "Then press ⌘V there."', 'public static let chipSubtitle = "Then paste there."'),
+    # Send Copies Automatically (2026-11-10, fork).
+    ("the chip offered while sending automatically", P,
+     "        !autoOn && connected && hostTakes(hostClipboard) && switchOn && hasStrings && changeCount != handled\n    }",
+     "        connected && hostTakes(hostClipboard) && switchOn && hasStrings && changeCount != handled\n    }"),
+    ("an automatic send with the switch off", P,
+     "        switchOn && autoOn && connected && hostTakes(hostClipboard) && active && hasStrings\n            && changeCount != handled && changeCount != tried\n    }",
+     "        autoOn && connected && hostTakes(hostClipboard) && active && hasStrings\n            && changeCount != handled && changeCount != tried\n    }"),
+    ("an automatic send while Sill is not active", P,
+     "        switchOn && autoOn && connected && hostTakes(hostClipboard) && active && hasStrings\n            && changeCount != handled && changeCount != tried\n    }",
+     "        switchOn && autoOn && connected && hostTakes(hostClipboard) && hasStrings\n            && changeCount != handled && changeCount != tried\n    }"),
+    ("an automatic send tried twice (a loop)", P,
+     "        switchOn && autoOn && connected && hostTakes(hostClipboard) && active && hasStrings\n            && changeCount != handled && changeCount != tried\n    }",
+     "        switchOn && autoOn && connected && hostTakes(hostClipboard) && active && hasStrings\n            && changeCount != handled\n    }"),
 ]
 caught = 0
 for name, file, old, new in MUTANTS:

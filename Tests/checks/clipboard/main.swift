@@ -274,11 +274,14 @@ check(P.deviceWrites(fromMac, switchOn: true, hostClipboard: 1, lastSent: sent, 
 for connected in [false, true] {
     for host in [nil, 1] as [Int?] {
         for on in [false, true] {
-            for has in [false, true] {
-                for handled in [nil, 5, 6] as [Int?] {
-                    let got = P.offersChip(connected: connected, hostClipboard: host, switchOn: on, hasStrings: has, changeCount: 6, handled: handled)
-                    let want = connected && host != nil && on && has && handled != 6
-                    check(got == want, "chip: connected \(connected), host \(host as Any), switch \(on), text \(has), handled \(handled as Any): \(got)")
+            for auto in [false, true] {
+                for has in [false, true] {
+                    for handled in [nil, 5, 6] as [Int?] {
+                        let got = P.offersChip(connected: connected, hostClipboard: host, switchOn: on, autoOn: auto,
+                                               hasStrings: has, changeCount: 6, handled: handled)
+                        let want = !auto && connected && host != nil && on && has && handled != 6
+                        check(got == want, "chip: connected \(connected), host \(host as Any), switch \(on), auto \(auto), text \(has), handled \(handled as Any): \(got)")
+                    }
                 }
             }
         }
@@ -302,6 +305,32 @@ check(!P.looksAtSessionStart(activatedAt: 100, now: 115.01), "after 15 s: none")
 check(!P.looksAtSessionStart(activatedAt: 100, now: 99.9), "before the activation (a clock that went back): none")
 check(P.activationWindow == 15 && P.chipLifetime == 20 && P.noteLifetime == 3 && P.deviceExpiry == 600 && P.lookInterval == 0.25,
       "the times: 15 s, 20 s, 3 s, 10 minutes, four looks a second")
+
+// MARK: - Send Copies Automatically (2026-11-10, fork)
+
+// autoSends: on, with text, a change not yet handled and not already tried this session, connected
+// to a Mac that takes the clipboard, with Sill active.
+check(P.autoSends(switchOn: true, autoOn: true, connected: true, hostClipboard: 1, active: true,
+                  hasStrings: true, changeCount: 7, handled: 6, tried: nil),
+      "auto: every condition true: sends")
+check(!P.autoSends(switchOn: false, autoOn: true, connected: true, hostClipboard: 1, active: true,
+                   hasStrings: true, changeCount: 7, handled: 6, tried: nil), "Share Clipboard off: nothing")
+check(!P.autoSends(switchOn: true, autoOn: false, connected: true, hostClipboard: 1, active: true,
+                   hasStrings: true, changeCount: 7, handled: 6, tried: nil), "the switch off: nothing")
+check(!P.autoSends(switchOn: true, autoOn: true, connected: false, hostClipboard: 1, active: true,
+                   hasStrings: true, changeCount: 7, handled: 6, tried: nil), "not connected: nothing")
+check(!P.autoSends(switchOn: true, autoOn: true, connected: true, hostClipboard: nil, active: true,
+                   hasStrings: true, changeCount: 7, handled: 6, tried: nil), "a Mac that does not take it: nothing")
+check(!P.autoSends(switchOn: true, autoOn: true, connected: true, hostClipboard: 1, active: false,
+                   hasStrings: true, changeCount: 7, handled: 6, tried: nil), "Sill not active: nothing")
+check(!P.autoSends(switchOn: true, autoOn: true, connected: true, hostClipboard: 1, active: true,
+                   hasStrings: false, changeCount: 7, handled: 6, tried: nil), "no text: nothing")
+check(!P.autoSends(switchOn: true, autoOn: true, connected: true, hostClipboard: 1, active: true,
+                   hasStrings: true, changeCount: 6, handled: 6, tried: nil), "already handled: nothing")
+check(!P.autoSends(switchOn: true, autoOn: true, connected: true, hostClipboard: 1, active: true,
+                   hasStrings: true, changeCount: 7, handled: 6, tried: 7), "already tried this change count: not again (no loop)")
+check(P.autoSends(switchOn: true, autoOn: true, connected: true, hostClipboard: 1, active: true,
+                  hasStrings: true, changeCount: 8, handled: 6, tried: 7), "a later change, once the one before it was tried: sends")
 
 check(P.deviceSends(["abc"], connected: true, hostClipboard: 1, switchOn: true) == .send(P.payload(text: "abc")!), "Paste sends the text")
 check(P.deviceSends(["", "b", "c"], connected: true, hostClipboard: 1, switchOn: true) == .send(P.payload(text: "b")!), "the first that is not empty")
@@ -395,13 +424,26 @@ check(C.stoppedLine(device: "iPad (iPad14,1)") == "Clipboard: iPad (iPad14,1) st
 check(C.ignoredLine(rate: 3, tooLong: 1, undecodable: 0) == "Clipboard from devices ignored in a minute: 3 from devices sending more than 4 a second, 1 longer than 256 KB.",
       "the ignored line")
 check(C.ignoredLine(rate: 0, tooLong: 0, undecodable: 2) == "Clipboard from devices ignored in a minute: 2 that did not decode.", "…with one count")
+// Send Copies Automatically's words (2026-11-10, fork): off by default; its sentence appends to the
+// group's footnote only while it is on, and only with Share Clipboard on.
+check(C.autoTitle == "Send Copies Automatically", "the switch's title")
+check(C.footnote(on: true, rightAway: true, autoOn: true, mac: "Mac mini", device: "iPad")
+      == C.footnote(on: true, rightAway: true, mac: "Mac mini", device: "iPad") + C.autoFootnoteAddition(device: "iPad"),
+      "the footnote with Send Copies Automatically on: its sentence appended")
+check(C.footnote(on: true, rightAway: true, autoOn: false, mac: "Mac mini", device: "iPad") == C.footnote(on: true, rightAway: true, mac: "Mac mini", device: "iPad"),
+      "…off: today's, unchanged")
+check(C.footnote(on: false, rightAway: false, autoOn: true, mac: "Mac mini", device: "iPad") == C.footnote(on: false, mac: "Mac mini", device: "iPad"),
+      "…with Share Clipboard off: today's, whatever Send Copies Automatically says")
+check(C.autoFootnoteAddition(device: "iPad").contains("iPad") && C.autoFootnoteAddition(device: "iPhone").contains("iPhone"),
+      "the addition names this device, not always iPad")
 let words = [C.chipTitle(mac: "M"), C.chipSubtitle, C.chipSpoken(mac: "M", device: "iPad"), C.pasteHint(mac: "M", device: "iPad"), C.sent(mac: "M"),
              C.sentSpoken(mac: "M"), C.tooLong(mac: "M"), C.switchTitle, C.rowTitle(mac: "M"), C.footnote(on: true, mac: "M", device: "iPad"),
              C.footnote(on: false, mac: "M", device: "iPad"), C.sharesLine(device: "d"), C.stoppedLine(device: "d"), C.ignoredLine(rate: 1, tooLong: 1, undecodable: 1),
              C.macFootnote, C.macAccessButton, C.notSent(mac: "M"), C.chipAnnouncement(mac: "M"),
              C.chipSubtitle(rightAway: true), C.chipSpoken(mac: "M", device: "iPad", rightAway: true),
              C.pasteHint(mac: "M", device: "iPad", rightAway: true), C.pasted(mac: "M"), C.rightAwayTitle(mac: "M"),
-             C.footnote(on: true, rightAway: true, mac: "M", device: "iPad")]
+             C.footnote(on: true, rightAway: true, mac: "M", device: "iPad"), C.autoTitle, C.autoFootnoteAddition(device: "iPad"),
+             C.footnote(on: true, rightAway: true, autoOn: true, mac: "M", device: "iPad")]
     + [P.MacAccess.allowed, .notAsked, .asks, .denied].flatMap { [C.macAccessWarning($0), C.macAccessHint($0), C.macAccessLine($0)].compactMap { $0 } }
 check(words.allSatisfy { !$0.contains("—") && !$0.contains("–") }, "no dashes in the words")
 check(words.allSatisfy { !$0.contains("'") && !$0.contains("\"") }, "typographic quotes only: \(words.filter { $0.contains("'") || $0.contains("\"") })")
