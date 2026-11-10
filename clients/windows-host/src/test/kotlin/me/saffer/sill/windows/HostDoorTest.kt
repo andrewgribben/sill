@@ -58,8 +58,14 @@ class HostDoorTest {
         val door = HostDoor(tempState(), "Test PC", port = 0, videoSourceFactory = { FakeVideoSource(ModelHost.defaultVideo().first, emptyList()) })
         door.use {
             val device = Identity.generate()
+            // TLS 1.3: the client's certificate is judged after its own handshake completes, so the
+            // refusal can surface only on first use (a write or a read), not from dial() itself
+            // (core/Tls.kt's SillTls doc); either way it must never reach a working session.
             assertFails("an unpaired device must not reach sill/1") {
-                SillTls.dial(loopback(door.boundPort), device, SillTls.SESSION_ALPN, Trust.AnyKey)
+                val c = SillTls.dial(loopback(door.boundPort), device, SillTls.SESSION_ALPN, Trust.AnyKey)
+                c.output.write(StreamMessage.json(Kind.HELLO, Hello("0.6.0", "test", 1, "Test").toJson()).serialized())
+                c.output.flush()
+                nextMessage(c)
             }
         }
     }
