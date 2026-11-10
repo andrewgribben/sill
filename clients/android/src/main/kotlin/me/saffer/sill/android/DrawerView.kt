@@ -6,6 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
+import android.graphics.Rect
 import android.graphics.RectF
 import android.text.Editable
 import android.text.InputType
@@ -23,6 +24,7 @@ import android.widget.TextView
 import me.saffer.sill.core.AppInfo
 import me.saffer.sill.core.WindowInfo
 import me.saffer.sill.core.ui.Copy
+import me.saffer.sill.core.ui.DrawerHighlight
 import me.saffer.sill.core.ui.Palette
 import me.saffer.sill.core.ui.Rgba
 import me.saffer.sill.core.ui.Symbol
@@ -62,10 +64,15 @@ abstract class Sheet(context: Context, protected val dp: Dp) : ViewGroup(context
 @SuppressLint("ViewConstructor")
 class AppRowView(context: Context, private val dp: Dp, val name: String, val icon: Bitmap?, val trailing: String?, val rowHeight: Double) : View(context) {
     var highlighted = false
+    /** The keyboard's current row (DrawerHighlight): an accent border, and `isSelected` so
+     *  accessibility services read it as selected (View.isSelected feeds AccessibilityNodeInfo). */
+    var keyboardHighlighted: Boolean = false
+        set(value) { if (field != value) { field = value; isSelected = value; invalidate() } }
     private val title = Look.textPaint(dp, Type.rowTitle, Palette.text)
     private val trail = Look.textPaint(dp, Type.rowTrailing, Palette.muted)
     private val iconBg = Look.fill(Palette.iconFallback)
     private val hi = Look.fill(Palette.control)
+    private val keyboardHi = Look.stroke(Palette.accent, dp(2.0))
     private val initials = Look.textPaint(dp, TextStyle(13.0, TextStyle.Weight.Semibold), Rgba.white, capped = false)
     private val bitmap = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
     private val rect = RectF()
@@ -82,6 +89,10 @@ class AppRowView(context: Context, private val dp: Dp, val name: String, val ico
 
     override fun onDraw(c: Canvas) {
         if (highlighted || isPressed) c.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), dp(Ui.rowRadius), dp(Ui.rowRadius), hi)
+        if (keyboardHighlighted) {
+            val inset = dp(1.0)
+            c.drawRoundRect(inset, inset, width - inset, height - inset, dp(Ui.rowRadius), dp(Ui.rowRadius), keyboardHi)
+        }
         val s = dp(Ui.rowIcon); val x = dp(10.0); val y = (height - s) / 2
         val r = rect.apply { set(x, y, x + s, y + s) }
         val ir = dp(Ui.rowIconRadius)
@@ -120,6 +131,11 @@ class DrawerView(context: Context, dp: Dp) : Sheet(context, dp) {
     private var active: Long? = null
     private var apps: List<AppInfo> = emptyList()
     private var icons: Map<String, Bitmap> = emptyMap()
+    /** Rows in the order DrawerHighlight counts through (open apps then closed apps), each with the
+     *  launch its tap would do. */
+    private var rows: List<Pair<AppRowView, () -> Unit>> = emptyList()
+    /** The keyboard's current row (DrawerHighlight, pure), or none. */
+    private var highlightedIndex: Int? = null
 
     init {
         addView(search); addView(scroll)
@@ -128,6 +144,15 @@ class DrawerView(context: Context, dp: Dp) : Sheet(context, dp) {
             override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
             override fun afterTextChanged(s: Editable?) = rebuild()
         })
+        search.field.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_DOWN -> { moveHighlight(DrawerHighlight.Key.Down); true }
+                KeyEvent.KEYCODE_DPAD_UP -> { moveHighlight(DrawerHighlight.Key.Up); true }
+                KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> { launchHighlighted(); true }
+                else -> false
+            }
+        }
     }
 
     fun setMac(name: String) { search.field.hint = Copy.searchApps(name.ifEmpty { "the Mac" }) }
@@ -139,8 +164,29 @@ class DrawerView(context: Context, dp: Dp) : Sheet(context, dp) {
 
     fun clearSearch() { search.field.setText("") }
 
+    /** The drawer opened with a hardware keyboard attached: the search field takes the keyboard at
+     *  once, so DPAD and Enter drive the list without a tap. */
+    fun focusSearch() { search.field.requestFocus() }
+
+    private fun moveHighlight(key: DrawerHighlight.Key) { setHighlight(DrawerHighlight.move(key, highlightedIndex, rows.size)) }
+
+    /** Enter: the highlighted row, or, with none highlighted, the one result a search narrowed to. */
+    private fun launchHighlighted() {
+        val index = highlightedIndex ?: (if (rows.size == 1) 0 else null) ?: return
+        rows.getOrNull(index)?.second?.invoke()
+    }
+
+    private fun setHighlight(index: Int?) {
+        highlightedIndex = index
+        for ((i, row) in rows.withIndex()) row.first.keyboardHighlighted = i == index
+        if (index != null) rows.getOrNull(index)?.first?.let { row ->
+            scroll.post { scroll.requestChildRectangleOnScreen(row, Rect(0, 0, row.width, row.height), false) }
+        }
+    }
+
     private fun rebuild() {
         list.removeAllViews()
+        val built = mutableListOf<Pair<AppRowView, () -> Unit>>()
         val q = search.field.text.toString().trim()
         fun match(n: String) = q.isEmpty() || n.contains(q, ignoreCase = true)
         val open = windows.groupBy { it.bundleID }.entries.filter { match(it.value.first().appName) }
@@ -149,12 +195,14 @@ class DrawerView(context: Context, dp: Dp) : Sheet(context, dp) {
             for ((bundle, ws) in open) {
                 val row = AppRowView(context, dp, ws.first().appName, icons[bundle], Copy.windows(ws.size), Ui.openRowHeight)
                 row.highlighted = ws.any { it.id == active }
-                row.setOnClickListener {
+                val launch = {
                     // An open app again shows its next window.
                     val i = ws.indexOfFirst { it.id == active }
                     onPickWindow(ws[(i + 1).mod(ws.size)].id)
                 }
+                row.setOnClickListener { launch() }
                 list.addView(row)
+                built.add(row to launch)
             }
         }
         val all = apps.filter { match(it.name) }
@@ -162,10 +210,14 @@ class DrawerView(context: Context, dp: Dp) : Sheet(context, dp) {
             list.addView(header(Copy.allApps))
             for (a in all) {
                 val row = AppRowView(context, dp, a.name, icons[a.bundleID], null, Ui.closedRowHeight)
-                row.setOnClickListener { onLaunch(a.bundleID) }
+                val launch = { onLaunch(a.bundleID) }
+                row.setOnClickListener { launch() }
                 list.addView(row)
+                built.add(row to launch)
             }
         }
+        rows = built
+        setHighlight(DrawerHighlight.afterFilterChange(rows.size))
     }
 
     private fun header(t: String) = text(Type.sectionHeader, Palette.muted).apply {
