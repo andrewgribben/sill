@@ -4,7 +4,7 @@ import me.saffer.sill.core.ParameterSets
 import java.io.File
 
 /**
- * Captures one monitor with ffmpeg (ddagrab + hevc_nvenc, falling back to gdigrab + hevc_mf, then
+ * Captures a region of one monitor (all of it for the Desktop) with ffmpeg (ddagrab + hevc_nvenc, falling back to gdigrab + hevc_mf, then
  * gdigrab + libx265) and parses its Annex B stdout into parameter sets and access units. Dropping
  * frames rather than queuing them is the caller's job ([HostSession.VideoPump]): this class only
  * reads whatever ffmpeg writes and hands it on.
@@ -13,7 +13,7 @@ import java.io.File
  * costs a connection stall of a few frames; a cleaner fix (NVENC's forced-IDR API) is a later
  * upgrade once phase 1's correctness is proven.
  */
-class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, private val height: Int, private val fps: Int = 60, private val bitrate: Int = 15_000_000, private val wake: () -> Unit = {}) : VideoSource {
+class FfmpegVideoSource(private val region: CaptureRegion, private val fps: Int = 60, private val bitrate: Int = 15_000_000, private val wake: () -> Unit = {}) : VideoSource {
     @Volatile private var process: Process? = null
     @Volatile private var running = false
     @Volatile private var reader: Thread? = null
@@ -89,10 +89,13 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
 
     private fun gopSeconds2() = fps * 2
 
+    private fun gdiRegion() = arrayOf("-offset_x", region.screenX.toString(), "-offset_y", region.screenY.toString(),
+        "-video_size", "${region.width}x${region.height}")
+
     private fun nvencCommand(exe: String) = listOf(
         exe, "-y", "-hide_banner", "-loglevel", "warning",
         // ddagrab hands D3D11 frames straight to NVENC: no copy through system memory.
-        "-init_hw_device", "d3d11va", "-filter_complex", "ddagrab=output_idx=$monitorIndex:framerate=$fps",
+        "-init_hw_device", "d3d11va", "-filter_complex", "ddagrab=output_idx=${region.monitor}:framerate=$fps:offset_x=${region.x}:offset_y=${region.y}:video_size=${region.width}x${region.height}",
         "-c:v", "hevc_nvenc", "-preset", "p1", "-tune", "ull", "-bf", "0", "-delay", "0", "-zerolatency", "1",
         "-rc", "cbr", "-b:v", bitrate.toString(), "-maxrate", bitrate.toString(), "-bufsize", (bitrate / 2).toString(),
         "-g", gopSeconds2().toString(), "-r", fps.toString(), "-forced-idr", "1",
@@ -101,14 +104,14 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
 
     private fun mfCommand(exe: String) = listOf(
         exe, "-y", "-hide_banner", "-loglevel", "warning",
-        "-f", "gdigrab", "-framerate", fps.toString(), "-i", "desktop",
+        "-f", "gdigrab", "-framerate", fps.toString(), *gdiRegion(), "-i", "desktop",
         "-c:v", "hevc_mf", "-b:v", bitrate.toString(), "-g", gopSeconds2().toString(), "-r", fps.toString(),
         "-f", "hevc", "-",
     )
 
     private fun x265Command(exe: String) = listOf(
         exe, "-y", "-hide_banner", "-loglevel", "warning",
-        "-f", "gdigrab", "-framerate", fps.toString(), "-i", "desktop",
+        "-f", "gdigrab", "-framerate", fps.toString(), *gdiRegion(), "-i", "desktop",
         "-c:v", "libx265", "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", bitrate.toString(),
         "-g", gopSeconds2().toString(), "-r", fps.toString(), "-x265-params", "repeat-headers=1",
         "-f", "hevc", "-",

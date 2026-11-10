@@ -24,18 +24,14 @@ class RobotInputSink : InputSink {
         if (down) robot?.mousePress(mask) else robot?.mouseRelease(mask)
     }
 
-    private val wheel = WheelCarry()
-    private val sideways = WheelCarry()
+    // In 120ths of a notch: 40 points a notch, as before, but every point goes, so it scrolls smoothly.
+    private val wheel = WheelCarry(40.0 / 120, limit = 6000)
+    private val sideways = WheelCarry(40.0 / 120, limit = 6000)
 
     override fun scroll(dxPoints: Double, dyPoints: Double) {
-        val r = robot ?: return
-        // A device's positive delta moves the content down (or right), which is Robot's negative (wheel away).
-        val down = wheel.notches(dyPoints)
-        if (down != 0) r.mouseWheel(-down)
-        // Robot's wheel is vertical only; Windows apps scroll sideways for Shift+wheel.
-        // shortcut: Shift+wheel, not WM_MOUSEHWHEEL, so an app that reads Shift+wheel otherwise (a zoom) gets that.
-        val right = sideways.notches(dxPoints)
-        if (right != 0) { r.keyPress(KeyEvent.VK_SHIFT); r.mouseWheel(-right); r.keyRelease(KeyEvent.VK_SHIFT) }
+        // A device's positive delta moves the content down (or right): Windows' wheel up (or left).
+        Win32.wheel(wheel.notches(dyPoints), horizontal = false)
+        Win32.wheel(-sideways.notches(dxPoints), horizontal = true)
     }
 
     override fun key(hidUsage: Int, down: Boolean, modifiers: Long) {
@@ -75,6 +71,13 @@ class RobotInputSink : InputSink {
         }
 
 
+        /** Every monitor's bounds, in the order ddagrab's output_idx counts them (shortcut: assumed, as
+         * the Desktop's capture always has; check when a second monitor is on). */
+        fun monitors(): List<java.awt.Rectangle> =
+            if (GraphicsEnvironment.isHeadless()) listOf(java.awt.Rectangle(0, 0, 1920, 1080))
+            else try { GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices.map { it.defaultConfiguration.bounds } }
+            catch (_: Exception) { listOf(java.awt.Rectangle(0, 0, 1920, 1080)) }
+
         fun monitorBounds(index: Int): java.awt.Rectangle {
             if (GraphicsEnvironment.isHeadless()) return java.awt.Rectangle(0, 0, 1920, 1080)   // tests, and SSH with no desktop session
             return try {
@@ -87,18 +90,17 @@ class RobotInputSink : InputSink {
 }
 
 /**
- * A device's scroll arrives as many small point deltas; Robot scrolls whole notches. The remainder
- * carries into the next delta (as the Mac's host carries sub-point remainders), so a slow drag
- * still scrolls. shortcut: whole notches only, so scrolling is steppy; upgrade with SendInput's
- * fine wheel deltas (mouseData below 120), which the JDK cannot send without FFM or JNA.
+ * A device's scroll arrives as small point deltas; the wheel takes whole units (notches, or 120ths
+ * of one). The remainder carries into the next delta (as the Mac's host carries sub-point
+ * remainders), so a slow drag still scrolls.
  */
-class WheelCarry(private val pointsPerNotch: Double = 40.0) {
+class WheelCarry(private val pointsPerNotch: Double = 40.0, private val limit: Int = 50) {
     private var carry = 0.0
 
     fun notches(points: Double): Int {
         if (!points.isFinite()) return 0
         val exact = carry + points
-        val whole = (exact / pointsPerNotch).toInt().coerceIn(-50, 50)
+        val whole = (exact / pointsPerNotch).toInt().coerceIn(-limit, limit)
         carry = (exact - whole * pointsPerNotch).let { if (kotlin.math.abs(it) >= pointsPerNotch) 0.0 else it }   // after a clamp
         return whole
     }

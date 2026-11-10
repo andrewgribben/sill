@@ -58,8 +58,10 @@ class LiveHostTest {
 
         val out = File(System.getenv("SILL_LIVE_OUT") ?: "live.hevc").outputStream()
         var frames = 0; var keys = 0; var bytes = 0L
+        var listed: WindowList? = null
         val listener = object : SessionListener {
-            override fun onConnected(list: WindowList) { println("LIVE connected: ${list.macName} hostVersion=${list.hostVersion} displays=${list.displays?.size}") }
+            override fun onConnected(list: WindowList) { listed = list; println("LIVE connected: ${list.macName} hostVersion=${list.hostVersion} displays=${list.displays?.size} windows=${list.windows.map { "${it.appName}: ${it.title.take(30)} ${it.width}x${it.height}" }}") }
+            override fun onWindowList(list: WindowList) { listed = list; println("LIVE list: active=${list.active} windows=${list.windows.size}") }
             override fun onVideoFormat(sets: ParameterSets) { println("LIVE parameter sets: ${sets.sets.size} NALs"); out.write(sets.annexB()) }
             override fun onFrame(annexB: ByteArray, keyframe: Boolean, timestamp: Double) { frames++; if (keyframe) keys++; bytes += annexB.size; out.write(annexB) }
             override fun onClipboard(text: String) { println("LIVE clipboard from the host: ${text.take(80)}") }
@@ -68,7 +70,11 @@ class LiveHostTest {
             ClientInfo("0.6.0", "live", "Live test (JVM)", "PC", "JVM", "live-test"), listener, Clock.System)
         session.start(null)
         Thread.sleep(500)
-        session.select(StreamSource.Desktop)
+        // SILL_LIVE_WINDOW: stream the first window whose title or app has this in it, not the Desktop.
+        val want = System.getenv("SILL_LIVE_WINDOW")?.takeIf { it.isNotEmpty() }
+        val pick = want?.let { w -> listed?.windows?.firstOrNull { it.title.contains(w, true) || it.appName.contains(w, true) } }
+        println("LIVE picking ${pick?.let { "${it.appName}: ${it.title}" } ?: "the Desktop"}")
+        session.select(pick?.let { StreamSource.Window(it.id) } ?: StreamSource.Desktop)
         // SILL_LIVE_PASTE: subscribe to the clipboard and put this text on the host's.
         System.getenv("SILL_LIVE_PASTE")?.takeIf { it.isNotEmpty() }?.let { session.updateShareClipboard(true); Thread.sleep(300); println("LIVE clipboard sent: ${session.sendClipboard(it)}") }
         val seconds = (System.getenv("SILL_LIVE_SECONDS") ?: "5").toLong()

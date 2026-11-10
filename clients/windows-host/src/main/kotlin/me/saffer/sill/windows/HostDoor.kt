@@ -29,6 +29,7 @@ import me.saffer.sill.core.StreamMessage
 import me.saffer.sill.core.StreamSettings
 import me.saffer.sill.core.StreamSource
 import me.saffer.sill.core.Viewport
+import me.saffer.sill.core.WindowInfo
 import me.saffer.sill.core.WindowList
 import java.io.IOException
 import java.net.InetAddress
@@ -48,11 +49,8 @@ class HostDoor(
     private val state: HostState,
     private val pcName: String,
     private val port: Int = DEFAULT_PORT,
-    /** One source per connected monitor index; swapped out by tests for [FakeVideoSource]. */
-    private val videoSourceFactory: (Int) -> VideoSource = { idx ->
-        val b = RobotInputSink.monitorBounds(idx)
-        FfmpegVideoSource(idx, b.width, b.height, wake = RobotInputSink::wake)
-    },
+    /** One capture per region; swapped out by tests for [FakeVideoSource]. */
+    private val videoSourceFactory: (CaptureRegion) -> VideoSource = { FfmpegVideoSource(it, wake = RobotInputSink::wake) },
     private val inputSink: InputSink = RobotInputSink(),
     private val pairingLifetimeSeconds: Double = 300.0,
     private val clipboard: HostClipboard? = HostClipboard(),
@@ -194,6 +192,8 @@ class HostDoor(
         @Volatile var hello: Hello? = null
         @Volatile var active: StreamSource = StreamSource.None
         private var activeMonitor = -1
+        /** What the running capture covers, where input lands. */
+        @Volatile private var region: CaptureRegion? = null
         private val out = s.outputStream
         @Volatile private var video: VideoSource? = null
         @Volatile private var videoBackedUp = false
@@ -209,8 +209,10 @@ class HostDoor(
             return screens.mapIndexed { i, d -> val b = d.defaultConfiguration.bounds; DisplayInfo(i.toLong(), d.iDstring, b.width, b.height) }
         }
 
+        @Volatile private var windows: List<Win32.Window> = Win32.windows()
+
         fun list() = WindowList(
-            macName = pcName, windows = emptyList(), active = active, launchID = launchID, hostVersion = "0.6.0",
+            macName = pcName, windows = windows.map { WindowInfo(it.id, it.title, it.exe.removeSuffix(".exe"), it.exe, it.width, it.height) }, active = active, launchID = launchID, hostVersion = "0.6.0",
             protocol = SillProtocol.CURRENT, gestures = 0, clipboard = if (clipboard != null) 1 else null,
             displays = monitorList().takeIf { it.size > 1 }, display = (activeMonitor.takeIf { it >= 0 } ?: 0).toLong(),
         )
@@ -229,6 +231,7 @@ class HostDoor(
                     StreamSettings(60, 15_000_000, 1.0, false, false, false), persistent = true, virtualDisplayAvailable = false, softwareEncoder = false,
                 ).toJson()))
                 send(StreamMessage.json(Kind.MAC_INFO, macInfo().toJson()))
+                if (Win32.available) watcher.start()
                 while (true) {
                     val m = reader.next() ?: break
                     received.add(m)
@@ -249,6 +252,7 @@ class HostDoor(
                 clipboard?.leave(this)
                 video?.stop()
                 videoSender.interrupt()
+                watcher.interrupt()
                 try { s.close() } catch (_: IOException) {}
                 sessions.remove(this)
             }
@@ -257,9 +261,9 @@ class HostDoor(
         private var lastViewport: Viewport? = null
 
         private fun handleInput(e: InputEvent) {
-            val b = RobotInputSink.monitorBounds(activeMonitor.takeIf { it >= 0 } ?: 0)
-            fun px(x: Double) = (b.x + x * b.width).toInt()
-            fun py(y: Double) = (b.y + y * b.height).toInt()
+            val b = region ?: CaptureRegion.desktop(0, RobotInputSink.monitorBounds(0))
+            fun px(x: Double) = (b.screenX + x * b.width).toInt()
+            fun py(y: Double) = (b.screenY + y * b.height).toInt()
             when (e) {
                 is InputEvent.Pointer -> when (e.action) {
                     me.saffer.sill.core.PointerAction.MOVE -> inputSink.moveTo(px(e.x), py(e.y))
@@ -276,21 +280,60 @@ class HostDoor(
             }
         }
 
-        private fun select(src: StreamSource) {
+        @Synchronized private fun select(src: StreamSource) {
             // A device asks for the Desktop by itself and may ask again: keep the capture that runs.
             if (src == active && video != null) { send(StreamMessage.json(Kind.WINDOW_LIST, list().toJson())); return }
-            active = src
-            activeMonitor = if (src == StreamSource.Desktop) 0 else -1
-            send(StreamMessage.json(Kind.WINDOW_LIST, list().toJson()))
             video?.stop(); video = null
-            if (src != StreamSource.Desktop) return
-            val v = videoSourceFactory(activeMonitor)
+            region = when (src) {
+                StreamSource.Desktop -> CaptureRegion.desktop(0, RobotInputSink.monitorBounds(0))
+                is StreamSource.Window -> {
+                    Win32.bringForward(src.id)
+                    Thread.sleep(150)   // its restore and redraw
+                    Win32.window(src.id)?.let { CaptureRegion.forWindow(it.x, it.y, it.width, it.height, RobotInputSink.monitors()) }
+                }
+                else -> null
+            }
+            active = if (region == null) StreamSource.None else src
+            activeMonitor = region?.monitor ?: -1
+            windows = Win32.windows()
+            send(StreamMessage.json(Kind.WINDOW_LIST, list().toJson()))
+            startCapture()
+        }
+
+        private fun startCapture() {
+            val r = region ?: return
+            val v = videoSourceFactory(r)
             video = v
             v.start(
                 onParams = { sets -> queueVideo(StreamMessage(Kind.PARAMETER_SETS, now(), false, sets.encoded()), true) },
                 onFrame = { key, au -> queueVideo(StreamMessage(Kind.FRAME, now(), key, au), key) },
             )
         }
+
+        /** Every 1.5 s: a changed window list goes to the device, and the window streaming is followed
+         * (moved or resized: the capture restarts on its new frame; closed or minimised: nothing streams). */
+        private val watcher = Thread({
+            try {
+                while (true) {
+                    Thread.sleep(1500)
+                    val now = Win32.windows()
+                    val src = active
+                    var changed = now.map { Triple(it.id, it.title, it.width to it.height) } != windows.map { Triple(it.id, it.title, it.width to it.height) }
+                    if (src is StreamSource.Window) synchronized(this) {
+                        val w = now.firstOrNull { it.id == src.id }
+                        val r = w?.let { CaptureRegion.forWindow(it.x, it.y, it.width, it.height, RobotInputSink.monitors()) }
+                        if (r != region) {
+                            Log.info(if (r == null) "the window streaming went (closed or minimised)" else "the window streaming moved: capturing ${r.width}×${r.height} again")
+                            video?.stop(); video = null; region = r
+                            if (r == null) active = StreamSource.None else startCapture()
+                            changed = true
+                        }
+                    }
+                    windows = now
+                    if (changed) send(StreamMessage.json(Kind.WINDOW_LIST, list().toJson()))
+                }
+            } catch (_: InterruptedException) {}
+        }, "sill-windows").apply { isDaemon = true }
 
         // Latency beats quality: video goes through a short queue drained by its own thread, so a slow
         // link never stalls ffmpeg's pipe. When it fills, frames are dropped until the next keyframe,

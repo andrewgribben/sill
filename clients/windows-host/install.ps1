@@ -38,10 +38,14 @@ if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
 Copy-Item $distDir $installDir -Recurse
 
 # javaw, not the .bat: no console window. The log file has everything stdout had.
-$javaw = (Get-Command javaw.exe -ErrorAction SilentlyContinue).Source
-if (-not $javaw -and $env:JAVA_HOME) { $javaw = Join-Path $env:JAVA_HOME "bin\javaw.exe" }
-if (-not $javaw -or -not (Test-Path $javaw)) { Write-Error "javaw.exe not found: install a JDK 17+ or set JAVA_HOME"; exit 1 }
-$javaArgs = "-Dsun.java2d.uiScale=1 -cp `"$installDir\lib\*`" me.saffer.sill.windows.MainKt --port $Port"
+# The newest installed Java 22 or later (the host calls Win32 through Java 22's FFM).
+$javaw = @($env:JAVA_HOME) + (Get-ChildItem "$env:ProgramFiles\*\jdk-*", "$env:ProgramFiles\*\jre-*" -Directory -ErrorAction SilentlyContinue).FullName |
+    Where-Object { $_ -and (Test-Path (Join-Path $_ "bin\javaw.exe")) -and ((Split-Path $_ -Leaf) -match '(?:jdk|jre)-?(\d+)') -and [int]$Matches[1] -ge 22 } |
+    Sort-Object { [int]((Split-Path $_ -Leaf) -replace '^\D*(\d+).*$', '$1') } -Descending | Select-Object -First 1
+if (-not $javaw) { Write-Error "No Java 22 or later found: winget install EclipseAdoptium.Temurin.25.JDK"; exit 1 }
+$javaw = Join-Path $javaw "bin\javaw.exe"
+Write-Host "Running with $javaw"
+$javaArgs = "-Dsun.java2d.uiScale=1 --enable-native-access=ALL-UNNAMED -cp `"$installDir\lib\*`" me.saffer.sill.windows.MainKt --port $Port"
 
 # A logon task in the interactive session: capture and Robot need a real desktop, which session 0
 # (services) and an SSH session do not have.

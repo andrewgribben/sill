@@ -1,23 +1,18 @@
 // Sill for Windows, phase 1: a Desktop-only home-door host, built on clients/core. No third-party
 // dependency: the Kotlin stdlib and the JDK (ScreenCaptureKit's and VideoToolbox's job is done by an
-// external ffmpeg process; AWT's Robot does input). JVM 17 bytecode, run by the PC's JDK 21.
+// external ffmpeg process; AWT's Robot does input; Win32 through Java 22's FFM, java.lang.foreign).
+// Compiled by a JDK 22 toolchain (Gradle finds an installed one), run by any Java 22 or later.
 plugins {
     kotlin("jvm")
     application
 }
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
-}
-kotlin {
-    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
-}
+kotlin { jvmToolchain(22) }
 
 application {
     mainClass.set("me.saffer.sill.windows.MainKt")
     // Robot and AWT's screen bounds in physical pixels on a scaled display, as ddagrab captures them.
-    applicationDefaultJvmArgs = listOf("-Dsun.java2d.uiScale=1")
+    applicationDefaultJvmArgs = listOf("-Dsun.java2d.uiScale=1", "--enable-native-access=ALL-UNNAMED")
 }
 
 dependencies {
