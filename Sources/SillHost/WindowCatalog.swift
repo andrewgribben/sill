@@ -155,6 +155,19 @@ final class WindowCatalog {
         (w.title ?? "").lowercased().contains("layerprobe")
     }
 
+    /// A Settings/Preferences window is caught two ways: a true floating panel or dropdown-as-window
+    /// uses a nonzero `windowLayer` already; a plain window the app titles "Settings"/"Preferences"
+    /// (the common case: Xcode's, Finder's, most Mac apps') sits at the ordinary layer 0, so there is
+    /// nothing in ScreenCaptureKit's window info to catch it by except its title.
+    /// shortcut: English titles only ("Settings"/"Preferences"); a localized Mac, or an app that
+    /// calls it something else ("Options", "Einstellungen"), only gets the nonzero-layer half of
+    /// this check. Upgrade to the window's AX subrole (AXDialog/AXSystemDialog) if that matters.
+    static func isAuxiliaryPanel(_ w: SCWindow) -> Bool {
+        if w.windowLayer != 0 { return true }
+        let t = (w.title ?? "").lowercased()
+        return t == "settings" || t == "preferences" || t.hasSuffix(" settings") || t.hasSuffix(" preferences")
+    }
+
     /// Window list and thumbnails, while a client is connected.
     static let pollInterval: Duration = .seconds(2)
     /// A window whose `WindowInfo` (title, app, size) has not changed since its last thumbnail,
@@ -373,7 +386,7 @@ final class WindowCatalog {
             return
         }
         guard let sibling = allWindows.first(where: {
-            $0.windowID != activeWindowID && $0.windowLayer != 0 && $0.owningApplication?.processID == pid
+            $0.windowID != activeWindowID && $0.owningApplication?.processID == pid && Self.isAuxiliaryPanel($0)
         }) else { return }
         followedSiblingID = sibling.windowID
         onSiblingWindow?(sibling.windowID)
