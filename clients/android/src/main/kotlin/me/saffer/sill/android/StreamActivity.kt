@@ -355,10 +355,25 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
             drawer.setMac(app.sessionMac); drawer.clearSearch(); refreshDrawer()
             drawer.visibility = View.VISIBLE
             dims.forEach { it.visibility = View.VISIBLE; it.onTap = { ui.closeDrawer() } }
+            // A hardware keyboard: the search field takes the keyboard at once, so DPAD and Enter
+            // drive the list without a tap (currentFocus is EditText keeps dispatchKeyEvent from
+            // forwarding those keys to the Mac while it is focused). Without one, nothing pops, as
+            // on a phone with only a touch screen.
+            if (hardwareKeyboardAttached()) drawer.post { drawer.focusSearch() }
         }
         drawerAnim?.cancel()
         val from = drawerProgress
-        val end = { if (!open) { drawer.visibility = View.GONE; if (!ui.state.settingsOpen) dims.forEach { it.visibility = View.GONE } } }
+        val end = {
+            if (!open) {
+                drawer.visibility = View.GONE
+                if (!ui.state.settingsOpen) {
+                    dims.forEach { it.visibility = View.GONE }
+                    // The search field let go (GONE clears it): the stream's own input view takes
+                    // the keyboard back, so hardware keys reach the Mac again.
+                    input.requestFocus()
+                }
+            }
+        }
         if (Motions.reduced) { drawerProgress = target; applyDrawer(); end(); return }
         drawerAnim = Motions.run(Motion.drawer, { p -> drawerProgress = from + (target - from) * p; applyDrawer() }, end)
     }
