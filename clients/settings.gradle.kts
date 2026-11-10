@@ -15,6 +15,7 @@ dependencyResolutionManagement {
 }
 rootProject.name = "sill-clients"
 include(":core")
+include(":windows-host")
 // The Android app needs the Android SDK: built only where one is configured (ANDROID_HOME,
 // ANDROID_SDK_ROOT or local.properties' sdk.dir), so the core builds anywhere.
 val androidSdk = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
