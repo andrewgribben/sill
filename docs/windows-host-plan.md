@@ -27,11 +27,16 @@ session messages, on the same default port, 7455.
   separate keys for them). A scroll lands under the finger, sub-notch remainders carried
   (`WheelCarry`), in 120ths of a notch so it scrolls smoothly. The wheel is posted to the window
   under the pointer (WM_MOUSEWHEEL, WM_MOUSEHWHEEL), not injected: on GRIBPC an injected wheel
-  (SendInput or Robot) never arrived while keys did, most likely eaten by Deskflow's server hook.
+  (SendInput or Robot, elevated or not) never arrived while keys and moves did, with Deskflow,
+  AutoHotkey, G Hub, Twinkle Tray and PowerToys each stopped in turn: the cause is still unknown.
+  Posted, it scrolls Notepad, File Explorer and classic controls, fine deltas included.
 - Window picking: the window list is Alt+Tab's windows (Win32 through Java 22's FFM, `Win32.kt`),
   sent again when it changes; a pick brings the window forward and captures its part of the screen
   (`CaptureRegion`), followed when it moves or resizes, nothing streams once it closes or minimises.
   Whatever covers the window shows (ffmpeg has no window grabber).
+- Aa, as the Mac's host: the streamed window is sized to the device's panel ÷ its text scale, at the
+  window's own DPI (an iPad's 1180×820 pt at 1x is 1475×1025 px at 125 %), kept on its monitor;
+  Off, another pick, the Desktop and the session's end put it back (`WindowFit`).
 - The clipboard both ways (kind 32, text, 256 KB), as the Mac's HostClipboard: only what is copied
   while a device subscribes, a device's text sent on to the other devices, never logged.
 - Wakes a sleeping display and ends a screen saver before capturing (capture is refused on both).
