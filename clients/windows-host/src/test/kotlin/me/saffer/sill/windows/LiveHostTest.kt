@@ -17,6 +17,7 @@ import me.saffer.sill.core.StreamMessage
 import me.saffer.sill.core.StreamSource
 import me.saffer.sill.core.Trust
 import me.saffer.sill.core.InputEvent
+import me.saffer.sill.core.Viewport
 import me.saffer.sill.core.WindowList
 import java.io.File
 import java.net.InetSocketAddress
@@ -78,6 +79,11 @@ class LiveHostTest {
         session.select(pick?.let { StreamSource.Window(it.id) } ?: StreamSource.Desktop)
         // SILL_LIVE_PASTE: subscribe to the clipboard and put this text on the host's.
         System.getenv("SILL_LIVE_PASTE")?.takeIf { it.isNotEmpty() }?.let { session.updateShareClipboard(true); Thread.sleep(300); println("LIVE clipboard sent: ${session.sendClipboard(it)}") }
+        // SILL_LIVE_VIEWPORT="w,h,scale[;w,h,scale…]": viewports 2 s apart (scale "off": Aa Off).
+        System.getenv("SILL_LIVE_VIEWPORT")?.takeIf { it.isNotEmpty() }?.split(';')?.forEach { spec ->
+            val (w, h, sc) = spec.split(','); Thread.sleep(2000)
+            session.setViewport(Viewport(w.toDouble(), h.toDouble(), sc.toDoubleOrNull())); println("LIVE viewport $spec")
+        }
         // SILL_LIVE_SCROLL=dy: a slow two-finger scroll in the middle of the picture, 3 points every 16 ms.
         System.getenv("SILL_LIVE_SCROLL")?.toDoubleOrNull()?.let { dy -> Thread.sleep(1500); repeat(60) { session.input(InputEvent.Scroll(0.5, 0.5, 0.0, dy)); Thread.sleep(16) } }
         val seconds = (System.getenv("SILL_LIVE_SECONDS") ?: "5").toLong()

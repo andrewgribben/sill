@@ -239,7 +239,7 @@ class HostDoor(
                         Kind.PING -> send(StreamMessage(Kind.PONG, 0.0, false, m.payload))
                         Kind.SELECT_SOURCE -> select(StreamSource.fromJson(JsonObj.parse(m.payload)))
                         Kind.INPUT -> try { handleInput(InputEvent.fromJson(JsonObj.parse(m.payload))) } catch (e: Throwable) { Log.error("input not applied: $e") }   // one bad event never ends the session
-                        Kind.VIEWPORT -> {}
+                        Kind.VIEWPORT -> try { lastViewport = Viewport.fromJson(JsonObj.parse(m.payload)); fitActive() } catch (e: Throwable) { Log.warn("viewport refused: $e") }
                         Kind.CLIENT_STATS -> {}
                         Kind.KEYFRAME_REQUEST -> video?.requestKeyframe()
                         Kind.CLIPBOARD -> clipboard?.receive(this, Clipboard.fromJson(JsonObj.parse(m.payload)))
@@ -250,6 +250,7 @@ class HostDoor(
             } catch (_: IOException) {
             } finally {
                 clipboard?.leave(this)
+                synchronized(this) { unfit() }
                 video?.stop()
                 videoSender.interrupt()
                 watcher.interrupt()
@@ -258,7 +259,40 @@ class HostDoor(
             }
         }
 
-        private var lastViewport: Viewport? = null
+        @Volatile private var lastViewport: Viewport? = null
+        /** The window Sill sized for Aa, and how it was, to put back (the Mac's restoreFits). */
+        private var fitted: Pair<Long, Win32.Before>? = null
+
+        /** Aa for the window streaming: sized to the panel ÷ the scale; Off puts it back. */
+        @Synchronized private fun fitActive() {
+            val src = active as? StreamSource.Window ?: return
+            if (fit(src.id)) followFit(src.id)
+        }
+
+        /** Sizes [id] for the last viewport; true if it was asked to change. */
+        private fun fit(id: Long): Boolean {
+            val v = lastViewport ?: return false
+            val want = WindowFit.pixels(v, Win32.dpi(id))
+            val w = Win32.window(id) ?: return false
+            if (want == null) { val was = fitted?.takeIf { it.first == id } ?: return false; Win32.restore(id, was.second); fitted = null; return true }
+            if (kotlin.math.abs(w.width - want.first) <= 2 && kotlin.math.abs(w.height - want.second) <= 2) return false
+            val monitors = RobotInputSink.monitors()
+            val m = monitors.firstOrNull { it.contains(w.x + w.width / 2, w.y + w.height / 2) } ?: monitors.first()
+            val before = Win32.setFrame(id, WindowFit.placed(w.x, w.y, want, m)) ?: return false
+            if (fitted?.first != id) { unfit(); fitted = id to before }
+            Log.info("sized ${w.exe} to ${want.first}×${want.second} px for a ${v.width.toInt()}×${v.height.toInt()} pt panel at ${v.scale}×")
+            return true
+        }
+
+        /** Puts back the window Sill sized, if any. */
+        private fun unfit() { fitted?.let { (id, was) -> Win32.restore(id, was) }; fitted = null }
+
+        /** After a fit, capture the window's new frame at once rather than at the watcher's next look. */
+        private fun followFit(id: Long) {
+            Thread.sleep(150)
+            val r = Win32.window(id)?.let { CaptureRegion.forWindow(it.x, it.y, it.width, it.height, RobotInputSink.monitors()) }
+            if (r != null && r != region) { video?.stop(); video = null; region = r; startCapture() }
+        }
 
         private fun handleInput(e: InputEvent) {
             val b = region ?: CaptureRegion.desktop(0, RobotInputSink.monitorBounds(0))
@@ -285,13 +319,15 @@ class HostDoor(
             if (src == active && video != null) { send(StreamMessage.json(Kind.WINDOW_LIST, list().toJson())); return }
             video?.stop(); video = null
             region = when (src) {
-                StreamSource.Desktop -> CaptureRegion.desktop(0, RobotInputSink.monitorBounds(0))
+                StreamSource.Desktop -> { unfit(); CaptureRegion.desktop(0, RobotInputSink.monitorBounds(0)) }
                 is StreamSource.Window -> {
+                    if (fitted?.first != src.id) unfit()
                     Win32.bringForward(src.id)
+                    fit(src.id)
                     Thread.sleep(150)   // its restore and redraw
                     Win32.window(src.id)?.let { CaptureRegion.forWindow(it.x, it.y, it.width, it.height, RobotInputSink.monitors()) }
                 }
-                else -> null
+                else -> { unfit(); null }
             }
             active = if (region == null) StreamSource.None else src
             activeMonitor = region?.monitor ?: -1

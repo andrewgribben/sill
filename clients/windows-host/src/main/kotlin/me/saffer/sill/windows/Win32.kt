@@ -36,6 +36,10 @@ object Win32 {
     private val setForegroundWindow by lazy { fn(user32, "SetForegroundWindow", FunctionDescriptor.of(JAVA_INT, ADDRESS)) }
     private val showWindow by lazy { fn(user32, "ShowWindow", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT)) }
     private val keybdEvent by lazy { fn(user32, "keybd_event", FunctionDescriptor.ofVoid(JAVA_BYTE, JAVA_BYTE, JAVA_INT, JAVA_LONG)) }
+    private val getWindowRect by lazy { fn(user32, "GetWindowRect", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS)) }
+    private val getDpiForWindow by lazy { fn(user32, "GetDpiForWindow", FunctionDescriptor.of(JAVA_INT, ADDRESS)) }
+    private val isZoomed by lazy { fn(user32, "IsZoomed", FunctionDescriptor.of(JAVA_INT, ADDRESS)) }
+    private val setWindowPos by lazy { fn(user32, "SetWindowPos", FunctionDescriptor.of(JAVA_INT, ADDRESS, ADDRESS, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT, JAVA_INT)) }
     private val getCursorPos by lazy { fn(user32, "GetCursorPos", FunctionDescriptor.of(JAVA_INT, ADDRESS)) }
     private val windowFromPoint by lazy { fn(user32, "WindowFromPoint", FunctionDescriptor.of(ADDRESS, JAVA_LONG)) }
     private val postMessageW by lazy { fn(user32, "PostMessageW", FunctionDescriptor.of(JAVA_INT, ADDRESS, JAVA_INT, JAVA_LONG, JAVA_LONG)) }
@@ -105,6 +109,40 @@ object Win32 {
         keybdEvent.invoke(0xE8.toByte(), 0.toByte(), 0, 0L)
         keybdEvent.invoke(0xE8.toByte(), 0.toByte(), 2, 0L)            // KEYEVENTF_KEYUP
         setForegroundWindow.invokeExact(h) as Int
+    }
+
+    /** What a window looked like before Sill sized it: its outer size, and whether it was maximised. */
+    data class Before(val outerWidth: Int, val outerHeight: Int, val maximised: Boolean)
+
+    /** The window's DPI (96 = 100 %), 96 if it can't say. */
+    fun dpi(id: Long): Int = if (!available) 96 else (getDpiForWindow.invokeExact(hwnd(id)) as Int).takeIf { it > 0 } ?: 96
+
+    /** Sizes and places a window so its visible frame is [frame] (physical pixels). Returns what it was, to put back. */
+    fun setFrame(id: Long, frame: java.awt.Rectangle): Before? {
+        if (!available) return null
+        val h = hwnd(id)
+        if ((isWindow.invokeExact(h) as Int) == 0) return null
+        Arena.ofConfined().use { a ->
+            val outer = a.allocate(JAVA_INT, 4)
+            val wasMax = (isZoomed.invokeExact(h) as Int) != 0
+            if (wasMax) showWindow.invokeExact(h, 9 /* SW_RESTORE */) as Int
+            if ((getWindowRect.invokeExact(h, outer) as Int) == 0) return null
+            val f = frame(h, a) ?: return null
+            val o = IntArray(4) { outer.getAtIndex(JAVA_INT, it.toLong()) }
+            // The outer rectangle holds an invisible resize border (the drop shadow) around the visible frame.
+            val l = f[0] - o[0]; val t = f[1] - o[1]; val rr = o[2] - f[2]; val b = o[3] - f[3]
+            setWindowPos.invokeExact(h, MemorySegment.NULL, frame.x - l, frame.y - t, frame.width + l + rr, frame.height + t + b, 0x0014 /* NOZORDER|NOACTIVATE */) as Int
+            return Before(o[2] - o[0], o[3] - o[1], wasMax)
+        }
+    }
+
+    /** Puts a window back as [before] says, where it is now. */
+    fun restore(id: Long, before: Before) {
+        if (!available) return
+        val h = hwnd(id)
+        if ((isWindow.invokeExact(h) as Int) == 0) return
+        if (before.maximised) { showWindow.invokeExact(h, 3 /* SW_MAXIMIZE */) as Int; return }
+        setWindowPos.invokeExact(h, MemorySegment.NULL, 0, 0, before.outerWidth, before.outerHeight, 0x0016 /* NOMOVE|NOZORDER|NOACTIVATE */) as Int
     }
 
     /** A wheel turn in 120ths of a notch, posted to the window under the pointer, so apps that scroll by
