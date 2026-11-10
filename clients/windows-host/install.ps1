@@ -32,23 +32,31 @@ Write-Host "Copying the distribution to $installDir"
 if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
 Copy-Item $distDir $installDir -Recurse
 
-$exe = Join-Path $installDir "bin\windows-host.bat"
+# javaw, not the .bat: no console window. The log file has everything stdout had.
+$javaw = (Get-Command javaw.exe -ErrorAction SilentlyContinue).Source
+if (-not $javaw -and $env:JAVA_HOME) { $javaw = Join-Path $env:JAVA_HOME "bin\javaw.exe" }
+if (-not $javaw -or -not (Test-Path $javaw)) { Write-Error "javaw.exe not found: install a JDK 17+ or set JAVA_HOME"; exit 1 }
+$javaArgs = "-Dsun.java2d.uiScale=1 -cp `"$installDir\lib\*`" me.saffer.sill.windows.MainKt --port $Port"
 
 # A logon task in the interactive session: capture and Robot need a real desktop, which session 0
 # (services) and an SSH session do not have.
 $taskName = "Sill Host"
 Write-Host "Registering the Scheduled Task '$taskName'"
-$action = New-ScheduledTaskAction -Execute $exe -Argument "--port $Port"
+$action = New-ScheduledTaskAction -Execute $javaw -Argument $javaArgs
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+# No time limit (the default stops a task after 72 hours), and started again if it ever exits.
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
+    -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
 
-Write-Host "Starting '$taskName' now"
+Write-Host "Starting '$taskName' now (stopping any copy already running)"
+Get-CimInstance Win32_Process -Filter "Name='java.exe' or Name='javaw.exe'" | Where-Object CommandLine -like '*me.saffer.sill.windows*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
 Start-ScheduledTask -TaskName $taskName
 
 Write-Host "Adding firewall rules for TCP $Port (the home door) and UDP 5353 (mDNS)"
+Get-NetFirewallRule -DisplayName "Sill Host*" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 New-NetFirewallRule -DisplayName "Sill Host (TCP $Port)" -Direction Inbound -Protocol TCP -LocalPort $Port -Action Allow -ErrorAction SilentlyContinue | Out-Null
 New-NetFirewallRule -DisplayName "Sill Host (mDNS)" -Direction Inbound -Protocol UDP -LocalPort 5353 -Action Allow -ErrorAction SilentlyContinue | Out-Null
 
