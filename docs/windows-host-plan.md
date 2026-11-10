@@ -24,25 +24,34 @@ session messages, on the same default port, 7455.
   up.
 - Applies pointer, click, scroll and keyboard input via `java.awt.Robot`, HID usages mapped to
   Windows virtual keys, the Mac's Command mapped to Ctrl and Option to Alt (Windows has no
-  separate keys for them).
+  separate keys for them). A scroll lands under the finger, sub-notch remainders carried
+  (`WheelCarry`); sideways scroll is Shift+wheel.
+- The clipboard both ways (kind 32, text, 256 KB), as the Mac's HostClipboard: only what is copied
+  while a device subscribes, a device's text sent on to the other devices, never logged.
+- Wakes a sleeping display and ends a screen saver before capturing (capture is refused on both).
+- Runs windowless under `javaw` with a notification area icon: who is connected, Pair a Device…,
+  Show Log, Quit Sill.
 
 ## What it skips (for later phases)
 
-Window list beyond the Desktop (multi-window), clipboard, audio, the Mac's menus, trackpad
-gestures, a virtual display, a tray icon or any UI beyond the pairing window, remote (away from
-home) access, and a signed installer. DPAPI protection of the stored private key is a known
+Window list beyond the Desktop (multi-window) and smooth scrolling (both need Win32 calls: Java
+22's FFM or JNA, the owner's decision), audio (the device plays AAC-ELD only, which ffmpeg's
+builds here cannot make, and ffmpeg has no WASAPI loopback), images on the clipboard, the Mac's
+menus, trackpad gestures, a virtual display, remote (away from home) access, and a signed
+installer. A lock screen stays black: Windows refuses its capture. DPAPI protection of the stored private key is a known
 shortcut; see `HostState.kt`'s comment.
 
 ## How to run it
 
 Build: `gradlew.bat :windows-host:installDist` (from `clients/`), on the PC with JDK 21 on PATH.
 That produces `clients/windows-host/build/install/windows-host/`, runnable directly with
-`bin\windows-host.bat`.
+`bin\windows-host.bat` (with a console window; the installed task runs `javaw`, without one).
 
 To install it as a logon service, run `clients/windows-host/install.ps1` from an elevated
 PowerShell after building: it copies the distribution to `%LOCALAPPDATA%\Sill\app`, registers a
 Scheduled Task ("Sill Host") that starts at logon in the interactive session (capture and `Robot`
-need a real desktop; they do not work from session 0 or an SSH session), starts it once, and opens
+need a real desktop; they do not work from session 0 or an SSH session), stops any copy already running first, starts it, restarts it within a minute if it exits
+with an error (Quit Sill exits cleanly and stays quit until the next logon), and opens
 the firewall for the home door's TCP port and mDNS's UDP 5353. If not run elevated, it prints the
 exact command to re-run instead of partially installing.
 
@@ -55,5 +64,6 @@ Logs go to stdout and `%LOCALAPPDATA%\Sill\Sill.log`.
   period alongside Windows' own responder.
 - HiDPI: `Robot`'s coordinates should be physical pixels with `-Dsun.java2d.uiScale=1`, but this
   was not verified on a real scaled Windows display.
-- ffmpeg's exact NVENC flags were not verified against a real NVIDIA GPU encoding a live capture in
-  this task; only the command lines and the Annex B parsing of synthetic data were tested.
+- Verified live on an RTX 4070 SUPER (ddagrab + hevc_nvenc, about 60 fps) and from an iPad:
+  pairing, picture, input, scrolling, the display's wake. A scaled display (3840 px at 125 %) took
+  input at the right place.
