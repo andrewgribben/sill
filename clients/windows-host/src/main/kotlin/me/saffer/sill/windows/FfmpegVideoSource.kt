@@ -54,25 +54,14 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
     private fun startReader(p: Process) {
         val assembler = AccessUnitAssembler({ s -> onParams?.invoke(s) }, { key, au -> onFrame?.invoke(key, au) })
         reader = Thread({
-            val buf = java.io.ByteArrayOutputStream()
+            val stream = AnnexBStream(assembler::feed)
             val chunk = ByteArray(1 shl 16)
             val input = p.inputStream
             try {
                 while (running) {
                     val n = input.read(chunk)
                     if (n < 0) break
-                    buf.write(chunk, 0, n)
-                    // Keep the tail after the last start code: it may be an incomplete NAL.
-                    val all = buf.toByteArray()
-                    val units = AnnexBParser.splitUnits(all)
-                    if (units.isEmpty()) continue
-                    // Re-run on everything but the final ~64 bytes kept for the next read is wasteful at
-                    // this scale (a few Mbit/s); simplicity over micro-optimisation for phase 1.
-                    units.dropLast(1).forEach(assembler::feed)
-                    val keepFrom = lastStartCodeOffset(all)
-                    buf.reset()
-                    if (keepFrom >= 0) { buf.write(all, keepFrom, all.size - keepFrom); assembler.feed(units.last()) }
-                    else buf.write(all)
+                    stream.write(chunk, n)
                 }
             } catch (_: Exception) {
             } finally {
@@ -81,11 +70,6 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
                 if (running) { Log.warn("ffmpeg's stdout ended; restarting the capture"); try { Thread.sleep(500) } catch (_: InterruptedException) {}; if (running) spawn() }
             }
         }, "ffmpeg-reader").apply { isDaemon = true; start() }
-    }
-
-    private fun lastStartCodeOffset(data: ByteArray): Int {
-        for (i in data.size - 4 downTo 0) if (data[i] == 0.toByte() && data[i + 1] == 0.toByte() && data[i + 2] == 1.toByte()) return i
-        return -1
     }
 
     override fun requestKeyframe() {

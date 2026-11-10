@@ -20,6 +20,20 @@ class AnnexBParserTest {
     }
 
     @Test
+    fun streamHandsOnEachUnitOnceWholeWhateverTheChunks() {
+        val units = listOf(nal(32, 9), nal(33, 8), nal(34, 7), nal(19, *IntArray(5000) { it % 250 + 2 }), nal(1, 5, 6), nal(1, 4), nal(1, 3))
+        val stream = units.fold(ByteArray(0)) { acc, u -> acc + start + u }
+        for (size in listOf(1, 3, 7, 64, 4096, stream.size)) {
+            val got = mutableListOf<ByteArray>()
+            val s = AnnexBStream { got.add(it.bytes) }
+            stream.toList().chunked(size).forEach { s.write(it.toByteArray()) }
+            // The last unit waits for a start code that hasn't come yet.
+            assertEquals(units.size - 1, got.size, "chunks of $size")
+            units.dropLast(1).zip(got).forEach { (want, have) -> assertContentEquals(want, have, "chunks of $size") }
+        }
+    }
+
+    @Test
     fun classifiesTypes() {
         assertTrue(AnnexBParser.isParameterSet(32)); assertTrue(AnnexBParser.isParameterSet(34)); assertTrue(!AnnexBParser.isParameterSet(19))
         assertTrue(AnnexBParser.isVcl(0)); assertTrue(AnnexBParser.isVcl(19)); assertTrue(!AnnexBParser.isVcl(32))

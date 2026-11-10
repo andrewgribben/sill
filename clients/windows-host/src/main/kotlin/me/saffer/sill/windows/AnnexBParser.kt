@@ -53,6 +53,29 @@ object AnnexBParser {
     }
 }
 
+/**
+ * Reads ffmpeg's stdout in whatever chunks the pipe gives, and hands on each NAL unit once, whole.
+ * shortcut: a NAL counts as complete only when the next start code arrives, so each frame waits for
+ * the next one (a frame's time, 17 ms at 60 fps). Upgrade: have ffmpeg insert an AUD after each
+ * access unit, or read packets from a container with lengths.
+ */
+class AnnexBStream(private val onNal: (AnnexBParser.Nal) -> Unit) {
+    private var pending = ByteArray(0)
+
+    fun write(chunk: ByteArray, n: Int = chunk.size) {
+        val all = pending + chunk.copyOf(n)
+        val lastStart = lastStartCode(all)
+        if (lastStart <= 0) { pending = all; return }
+        AnnexBParser.splitUnits(all.copyOf(lastStart)).forEach(onNal)
+        pending = all.copyOfRange(lastStart, all.size)   // the unit still arriving
+    }
+
+    private fun lastStartCode(data: ByteArray): Int {
+        for (i in data.size - 3 downTo 0) if (data[i] == 0.toByte() && data[i + 1] == 0.toByte() && data[i + 2] == 1.toByte()) return i
+        return -1
+    }
+}
+
 /** Feed [feed] every NAL as ffmpeg emits it; it calls back with parameter sets (only when changed) and access units. */
 class AccessUnitAssembler(private val onParams: (ParameterSets) -> Unit, private val onFrame: (keyframe: Boolean, lengthPrefixed: ByteArray) -> Unit) {
     private var vps: ByteArray? = null
