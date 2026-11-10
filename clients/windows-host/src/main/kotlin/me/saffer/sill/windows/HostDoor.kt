@@ -262,6 +262,8 @@ class HostDoor(
         @Volatile private var lastViewport: Viewport? = null
         /** The window Sill sized for Aa, and how it was, to put back (the Mac's restoreFits). */
         private var fitted: Pair<Long, Win32.Before>? = null
+        /** WindowFocus's throttle for raiseBeforeInput: one bring-forward attempt per 0.5 s. */
+        @Volatile private var lastBringForwardAt = 0L
 
         /** Aa for the window streaming: sized to the panel ÷ the scale; Off puts it back. */
         @Synchronized private fun fitActive() {
@@ -296,6 +298,7 @@ class HostDoor(
 
         private fun handleInput(e: InputEvent) {
             val b = region ?: CaptureRegion.desktop(0, RobotInputSink.monitorBounds(0))
+            raiseBeforeInput(e)
             fun px(x: Double) = (b.screenX + x * b.width).toInt()
             fun py(y: Double) = (b.screenY + y * b.height).toInt()
             when (e) {
@@ -312,6 +315,20 @@ class HostDoor(
                 is InputEvent.Key -> inputSink.key(e.hidUsage, e.down, e.modifiers)
                 is InputEvent.ScrollGesture -> {}
             }
+        }
+
+        /** The same class of gap as the Mac host's raiseIfInteracting (see WindowFocus's doc): a
+         * click, a key down or text needs the streamed window on top of the PC's own windows, or
+         * it lands on whatever is actually there instead (Win32.bringForward used to run only
+         * from `select`, a device's own pick). Throttled (WindowFocus.shouldAttempt) so a burst
+         * of keys or clicks makes one attempt. The Desktop has nothing to bring forward. */
+        private fun raiseBeforeInput(e: InputEvent) {
+            val src = active as? StreamSource.Window ?: return
+            if (!WindowFocus.needsFocus(e)) return
+            val now = System.nanoTime()
+            if (!WindowFocus.shouldAttempt(lastBringForwardAt, now)) return
+            lastBringForwardAt = now
+            if (Win32.windows().firstOrNull()?.id != src.id) Win32.bringForward(src.id)
         }
 
         @Synchronized private fun select(src: StreamSource) {
