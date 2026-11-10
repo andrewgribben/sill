@@ -58,13 +58,16 @@ class RobotInputSink : InputSink {
     companion object {
         private val wakeRobot: Robot? by lazy { try { Robot() } catch (_: Throwable) { null } }
 
-        /** Counts as user activity: wakes a sleeping display and ends a screen saver (which ignores
-         * moves of a few pixels, and runs on its own desktop, where capture is refused). */
+        /** Wakes a sleeping display and ends a screen saver (whose own desktop capture is refused on). */
         fun wake() {
+            // Synthetic input never reaches the screen saver's desktop, so end it: it runs as this user.
+            // A secure one ("On resume, display logon screen") then shows the lock screen, as at the PC.
+            ProcessHandle.allProcesses().filter { it.info().command().orElse("").endsWith(".scr", ignoreCase = true) }
+                .forEach { Log.info("ending the screen saver (${it.info().command().orElse("")}) so the desktop can be captured"); it.destroy() }
             val r = wakeRobot ?: return
             val at = try { java.awt.MouseInfo.getPointerInfo()?.location } catch (_: Throwable) { null }
-            if (at == null) { r.mouseMove(0, 0); return }   // no pointer to read on the screen saver's desktop
-            r.mouseMove(at.x + 40, at.y + 40); r.mouseMove(at.x, at.y)
+            if (at == null) return
+            r.mouseMove(at.x + 1, at.y); r.mouseMove(at.x, at.y)
         }
 
 
