@@ -46,7 +46,9 @@ class FfmpegVideoSource(private val monitorIndex: Int, private val width: Int, p
                 Log.warn("ffmpeg attempt ${i + 1} failed to start: ${e.message}")
             }
         }
-        Log.error("every ffmpeg attempt failed; no video will stream")
+        // Capture is refused while the desktop can't be read (locked, a UAC prompt): try again until it can.
+        Log.error("every ffmpeg attempt failed; trying again in 2 s")
+        Thread({ try { Thread.sleep(2000) } catch (_: InterruptedException) {}; if (running && process?.isAlive != true) spawn() }, "ffmpeg-retry").apply { isDaemon = true; start() }
     }
 
     private fun startReader(p: Process) {
