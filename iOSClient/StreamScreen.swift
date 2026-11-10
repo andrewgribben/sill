@@ -2274,9 +2274,13 @@ struct AppDrawer: View {
     @ObservedObject var client: StreamClient
     @Binding var drawerOpen: Bool
     @State private var search = ""
-    /// The search field has the keyboard. Set only by DEBUG `-SillDrawerSearch` (ContentView's
-    /// contract); a tap focuses the field as before.
+    /// The search field has the keyboard. Set by DEBUG `-SillDrawerSearch` (ContentView's contract), a
+    /// tap, or the drawer opening with a hardware keyboard attached (`focusIfHardwareKeyboard`).
     @FocusState private var searchFocused: Bool
+    /// An index into `openApps + closedApps`, the order the drawer shows them in: the keyboard's
+    /// highlighted row, or none (DrawerHighlight, pure). Up/Down move it; it resets when the search
+    /// text changes.
+    @State private var highlightedIndex: Int?
 
     var body: some View {
         VStack(spacing: 6) {
@@ -2287,34 +2291,46 @@ struct AppDrawer: View {
                 Spacer(minLength: 0)
             } else {
                 searchField
-                ScrollView {
-                    VStack(spacing: 6) {
-                        if !openApps.isEmpty {
-                            header("Open now")
-                            ForEach(openApps) { app in
-                                DrawerRow(height: 50,
-                                          highlighted: app.bundleID == activeBundleID,
-                                          title: app.name,
-                                          trailing: app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
-                                          action: { show(app) }) {
-                                    AppIcon(image: client.icons[app.bundleID], name: app.name,
-                                            size: 32, radius: 9, fontSize: 12)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 6) {
+                            if !openApps.isEmpty {
+                                header("Open now")
+                                ForEach(Array(openApps.enumerated()), id: \.element.id) { index, app in
+                                    DrawerRow(height: 50,
+                                              highlighted: app.bundleID == activeBundleID,
+                                              keyboardHighlighted: highlightedIndex == index,
+                                              title: app.name,
+                                              trailing: app.windows.count == 1 ? "1 window" : "\(app.windows.count) windows",
+                                              action: { show(app) }) {
+                                        AppIcon(image: client.icons[app.bundleID], name: app.name,
+                                                size: 32, radius: 9, fontSize: 12)
+                                    }
+                                    .id(index)
                                 }
                             }
-                        }
-                        if !closedApps.isEmpty {
-                            header("All apps").padding(.top, 2)
-                            ForEach(closedApps) { app in
-                                DrawerRow(height: 46, highlighted: false, title: app.name, trailing: nil,
-                                          action: { client.launch(bundleID: app.bundleID) }) {
-                                    AppIcon(image: client.icons[app.bundleID], name: app.name,
-                                            size: 32, radius: 9, fontSize: 12)
+                            if !closedApps.isEmpty {
+                                header("All apps").padding(.top, 2)
+                                ForEach(Array(closedApps.enumerated()), id: \.element.id) { offset, app in
+                                    let index = openApps.count + offset
+                                    DrawerRow(height: 46, highlighted: false,
+                                              keyboardHighlighted: highlightedIndex == index,
+                                              title: app.name, trailing: nil,
+                                              action: { client.launch(bundleID: app.bundleID) }) {
+                                        AppIcon(image: client.icons[app.bundleID], name: app.name,
+                                                size: 32, radius: 9, fontSize: 12)
+                                    }
+                                    .id(index)
                                 }
                             }
                         }
                     }
+                    .scrollIndicators(.hidden)
+                    .onChange(of: highlightedIndex) { _, index in
+                        guard let index else { return }
+                        withAnimation(.easeOut(duration: 0.12)) { proxy.scrollTo(index, anchor: .center) }
+                    }
                 }
-                .scrollIndicators(.hidden)
             }
         }
         .padding(14)
@@ -2322,6 +2338,14 @@ struct AppDrawer: View {
         .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
             .strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
         .shadow(color: .black.opacity(0.65), radius: 30, x: 0, y: 24)
+        .onAppear(perform: focusIfHardwareKeyboard)
+    }
+
+    /// The drawer opened: with a hardware keyboard attached the search field takes the keyboard at
+    /// once (`HardwareKeyboardMonitor`, the app's one detector), so arrow keys and Return drive the
+    /// list without a tap. Without one, do nothing: no software keyboard pops on iPhone or iPad.
+    private func focusIfHardwareKeyboard() {
+        if HardwareKeyboardMonitor.shared.attached { searchFocused = true }
     }
 
     /// A locked Mac (`StreamClient.lockWhy`): one line in place of the search field and both lists, read
@@ -2357,13 +2381,41 @@ struct AppDrawer: View {
                 .submitLabel(.search)
                 .accessibilityLabel("Search apps on this Mac")
                 .focused($searchFocused)
+                .onSubmit(launchHighlighted)
+                .onKeyPress(.downArrow) { moveHighlight(.down); return .handled }
+                .onKeyPress(.upArrow) { moveHighlight(.up); return .handled }
         }
         .frame(height: 48)
         .padding(.horizontal, 14)
         .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Palette.control))
+        .onChange(of: search) { _, _ in highlightedIndex = DrawerHighlight.afterFilterChange(count: rowCount) }
         #if DEBUG
         .onAppear(perform: searchFromLaunchArguments)
         #endif
+    }
+
+    /// Up/Down in the search field (`DrawerHighlight.move`, pure).
+    private func moveHighlight(_ key: DrawerHighlight.Key) {
+        highlightedIndex = DrawerHighlight.move(key, from: highlightedIndex, count: rowCount)
+    }
+
+    /// Return: the highlighted row, or, with none highlighted, the one result a search narrowed to.
+    private func launchHighlighted() {
+        let index = highlightedIndex ?? (rowCount == 1 ? 0 : nil)
+        guard let index else { return }
+        launchRow(at: index)
+    }
+
+    /// `openApps` then `closedApps`, the order the drawer shows them in and `highlightedIndex` counts
+    /// through.
+    private var rowCount: Int { openApps.count + closedApps.count }
+
+    private func launchRow(at index: Int) {
+        if index < openApps.count {
+            show(openApps[index])
+        } else if closedApps.indices.contains(index - openApps.count) {
+            client.launch(bundleID: closedApps[index - openApps.count].bundleID)
+        }
     }
 
     #if DEBUG
@@ -2438,19 +2490,23 @@ struct AppDrawer: View {
     }
 }
 
-/// One app row: icon, name, optional trailing count.
+/// One app row: icon, name, optional trailing count. `highlighted` marks the app already showing
+/// (Palette.control fill); `keyboardHighlighted` is the keyboard's current row (an accent border, on
+/// top of that fill if both apply), read by VoiceOver as selected.
 struct DrawerRow<Leading: View>: View {
     let height: CGFloat
     let highlighted: Bool
+    var keyboardHighlighted: Bool = false
     let title: String
     let trailing: String?
     let action: () -> Void
     let leading: () -> Leading
 
-    init(height: CGFloat, highlighted: Bool, title: String, trailing: String?,
-         action: @escaping () -> Void, @ViewBuilder leading: @escaping () -> Leading) {
+    init(height: CGFloat, highlighted: Bool, keyboardHighlighted: Bool = false, title: String,
+         trailing: String?, action: @escaping () -> Void, @ViewBuilder leading: @escaping () -> Leading) {
         self.height = height
         self.highlighted = highlighted
+        self.keyboardHighlighted = keyboardHighlighted
         self.title = title
         self.trailing = trailing
         self.action = action
@@ -2480,9 +2536,12 @@ struct DrawerRow<Leading: View>: View {
             .frame(maxWidth: .infinity)
             .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .fill(highlighted ? Palette.control : Color.clear))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Palette.accent.opacity(keyboardHighlighted ? 0.9 : 0), lineWidth: 2))
             .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(keyboardHighlighted ? .isSelected : [])
     }
 }
 
