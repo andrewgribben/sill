@@ -134,6 +134,12 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
     private var fillArea: Rect? = null
     private var ticking = false
     private var lastClip: String? = null
+    /** Send Copies Automatically on Android (no setting here: Android reads the clipboard without a
+     *  prompt, so it always does): the primary clip's listener, registered only while this window
+     *  has focus (Android 10+ only lets the focused app read the clip). */
+    private val clipboardManager by lazy { getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
+    private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener { checkClipboard() }
+    private var clipboardListenerAdded = false
     private var insets = Insets.zero
     private var reading: FoldMapping.Reading = FoldMapping.Reading.Nothing
     private var fold: FoldInfo = FoldInfo.Inferred
@@ -215,6 +221,7 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
         if (app.streamScreen === this) app.streamScreen = null
         main.removeCallbacksAndMessages(null)
         if (::foldReader.isInitialized) foldReader.stop()
+        if (clipboardListenerAdded) { clipboardManager.removePrimaryClipChangedListener(clipboardListener); clipboardListenerAdded = false }
         decoder.release()
         super.onDestroy()
     }
@@ -226,7 +233,15 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
     override fun onResume() {
         super.onResume()
         // This device's copy reaches the Mac when the stream comes back to the front (Share Clipboard).
-        val clip = (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip
+        checkClipboard()
+    }
+
+    /** This device's clipboard, sent to the Mac if it has changed since the last send or write from
+     *  it (Share Clipboard: `Session.sendClipboard` itself refuses a Mac that does not share it). Run
+     *  at `onResume` and by `clipboardListener` while this window has focus, so a copy made with Sill
+     *  in front (split screen, or inside Sill) reaches the Mac without waiting for the next resume. */
+    private fun checkClipboard() {
+        val clip = clipboardManager.primaryClip
         val text = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
         if (text != null && text != lastClip && session?.sendClipboard(text) == true) lastClip = text
     }
@@ -704,6 +719,17 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus) releaseKeys()
+        // Android 10+ only lets the focused app read the clip, so the listener (and the read it
+        // brings) only runs while this window has it; a copy made while focused is caught at once,
+        // not just at the next onResume.
+        if (hasFocus && !clipboardListenerAdded) {
+            clipboardManager.addPrimaryClipChangedListener(clipboardListener)
+            clipboardListenerAdded = true
+            checkClipboard()      // focus regained: a copy made elsewhere while unfocused, caught now
+        } else if (!hasFocus && clipboardListenerAdded) {
+            clipboardManager.removePrimaryClipChangedListener(clipboardListener)
+            clipboardListenerAdded = false
+        }
     }
 
     override fun onPause() { releaseKeys(); super.onPause() }
@@ -826,7 +852,7 @@ class StreamActivity : Activity(), SessionListener, SurfaceHolder.Callback {
     }
     override fun onClipboard(text: String) = runOnUiThread {
         lastClip = text
-        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Mac", text))
+        clipboardManager.setPrimaryClip(ClipData.newPlainText("Mac", text))
     }
     override fun onMacMenu(menu: MacMenu) = runOnUiThread { macMenus.receive(menu) }
     override fun onStats(stats: ClientStats) = runOnUiThread {
