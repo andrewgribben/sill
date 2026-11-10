@@ -58,11 +58,13 @@ class RobotInputSink : InputSink {
     companion object {
         private val wakeRobot: Robot? by lazy { try { Robot() } catch (_: Throwable) { null } }
 
-        /** Counts as user activity: wakes a sleeping display and ends a screen saver. */
+        /** Counts as user activity: wakes a sleeping display and ends a screen saver (which ignores
+         * moves of a few pixels, and runs on its own desktop, where capture is refused). */
         fun wake() {
             val r = wakeRobot ?: return
-            val at = try { java.awt.MouseInfo.getPointerInfo()?.location } catch (_: Throwable) { null } ?: return
-            r.mouseMove(at.x + 1, at.y); r.mouseMove(at.x, at.y)
+            val at = try { java.awt.MouseInfo.getPointerInfo()?.location } catch (_: Throwable) { null }
+            if (at == null) { r.mouseMove(0, 0); return }   // no pointer to read on the screen saver's desktop
+            r.mouseMove(at.x + 40, at.y + 40); r.mouseMove(at.x, at.y)
         }
 
 
