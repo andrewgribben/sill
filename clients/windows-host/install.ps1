@@ -28,6 +28,11 @@ if (-not $isAdmin) {
 }
 
 $installDir = Join-Path $env:LOCALAPPDATA "Sill\app"
+# A running host holds the old jars open: stop it (and its ffmpeg) before replacing them.
+Stop-ScheduledTask -TaskName "Sill Host" -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name='java.exe' or Name='javaw.exe'" | Where-Object CommandLine -like '*me.saffer.sill.windows*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Get-Process ffmpeg -ErrorAction SilentlyContinue | Stop-Process -Force
+Start-Sleep -Milliseconds 500
 Write-Host "Copying the distribution to $installDir"
 if (Test-Path $installDir) { Remove-Item $installDir -Recurse -Force }
 Copy-Item $distDir $installDir -Recurse
@@ -51,8 +56,7 @@ $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoi
 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
 
-Write-Host "Starting '$taskName' now (stopping any copy already running)"
-Get-CimInstance Win32_Process -Filter "Name='java.exe' or Name='javaw.exe'" | Where-Object CommandLine -like '*me.saffer.sill.windows*' | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+Write-Host "Starting '$taskName' now"
 Start-ScheduledTask -TaskName $taskName
 
 Write-Host "Adding firewall rules for TCP $Port (the home door) and UDP 5353 (mDNS)"
