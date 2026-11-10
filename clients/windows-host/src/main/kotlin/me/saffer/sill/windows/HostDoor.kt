@@ -55,6 +55,7 @@ class HostDoor(
     },
     private val inputSink: InputSink = RobotInputSink(),
     private val pairingLifetimeSeconds: Double = 300.0,
+    private val clipboard: HostClipboard? = HostClipboard(),
 ) : AutoCloseable {
     val identity get() = state.identity
     val fingerprint: ByteArray get() = identity.fingerprint
@@ -185,7 +186,7 @@ class HostDoor(
     }
 
     /** One session connection (sill/1): hello, catalog, video, input, pings, goodbye. */
-    inner class HostSession(private val s: SSLSocket) {
+    inner class HostSession(private val s: SSLSocket) : HostClipboard.Subscriber {
         val deviceFingerprint: ByteArray? = (s.session.peerCertificates.firstOrNull() as? java.security.cert.X509Certificate)?.let { Spki.fingerprint(it.publicKey) }
         @Volatile var hello: Hello? = null
         @Volatile var active: StreamSource = StreamSource.None
@@ -194,6 +195,8 @@ class HostDoor(
         @Volatile private var video: VideoSource? = null
         @Volatile private var videoBackedUp = false
         val received = CopyOnWriteArrayList<StreamMessage>()
+
+        override fun send(c: Clipboard) = send(StreamMessage.json(Kind.CLIPBOARD, c.toJson()))
 
         @Synchronized fun send(m: StreamMessage) { try { out.write(m.serialized()); out.flush() } catch (_: IOException) {} }
 
@@ -205,7 +208,7 @@ class HostDoor(
 
         fun list() = WindowList(
             macName = pcName, windows = emptyList(), active = active, launchID = launchID, hostVersion = "0.6.0",
-            protocol = SillProtocol.CURRENT, gestures = 0, clipboard = 0,
+            protocol = SillProtocol.CURRENT, gestures = 0, clipboard = if (clipboard != null) 1 else null,
             displays = monitorList().takeIf { it.size > 1 }, display = (activeMonitor.takeIf { it >= 0 } ?: 0).toLong(),
         )
 
@@ -233,12 +236,14 @@ class HostDoor(
                         Kind.VIEWPORT -> {}
                         Kind.CLIENT_STATS -> {}
                         Kind.KEYFRAME_REQUEST -> video?.requestKeyframe()
+                        Kind.CLIPBOARD -> clipboard?.receive(this, Clipboard.fromJson(JsonObj.parse(m.payload)))
                         Kind.HELLO -> violations.add("a second hello")
                         else -> {}
                     }
                 }
             } catch (_: IOException) {
             } finally {
+                clipboard?.leave(this)
                 video?.stop()
                 videoSender.interrupt()
                 try { s.close() } catch (_: IOException) {}

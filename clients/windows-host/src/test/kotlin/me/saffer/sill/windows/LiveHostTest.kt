@@ -62,12 +62,15 @@ class LiveHostTest {
             override fun onConnected(list: WindowList) { println("LIVE connected: ${list.macName} hostVersion=${list.hostVersion} displays=${list.displays?.size}") }
             override fun onVideoFormat(sets: ParameterSets) { println("LIVE parameter sets: ${sets.sets.size} NALs"); out.write(sets.annexB()) }
             override fun onFrame(annexB: ByteArray, keyframe: Boolean, timestamp: Double) { frames++; if (keyframe) keys++; bytes += annexB.size; out.write(annexB) }
+            override fun onClipboard(text: String) { println("LIVE clipboard from the host: ${text.take(80)}") }
         }
         val session = SillSession(SillTls.dial(addr, device, SillTls.SESSION_ALPN, Trust.Pinned(hostFp)),
             ClientInfo("0.6.0", "live", "Live test (JVM)", "PC", "JVM", "live-test"), listener, Clock.System)
         session.start(null)
         Thread.sleep(500)
         session.select(StreamSource.Desktop)
+        // SILL_LIVE_PASTE: subscribe to the clipboard and put this text on the host's.
+        System.getenv("SILL_LIVE_PASTE")?.takeIf { it.isNotEmpty() }?.let { session.updateShareClipboard(true); Thread.sleep(300); println("LIVE clipboard sent: ${session.sendClipboard(it)}") }
         val seconds = (System.getenv("SILL_LIVE_SECONDS") ?: "5").toLong()
         Thread.sleep(seconds * 1000)
         session.close(); out.close()

@@ -55,7 +55,7 @@ class HostDoorTest {
 
     @Test
     fun anUnpairedKeyIsRefusedAtSillOne() {
-        val door = HostDoor(tempState(), "Test PC", port = 0, videoSourceFactory = { FakeVideoSource(ModelHost.defaultVideo().first, emptyList()) })
+        val door = HostDoor(tempState(), "Test PC", port = 0, clipboard = null, videoSourceFactory = { FakeVideoSource(ModelHost.defaultVideo().first, emptyList()) })
         door.use {
             val device = Identity.generate()
             // TLS 1.3: the client's certificate is judged after its own handshake completes, so the
@@ -75,7 +75,7 @@ class HostDoorTest {
         val sink = RecordingInputSink()
         val fakeSets = ModelHost.defaultVideo().first
         val fakeFrames = ModelHost.defaultVideo().second
-        val door = HostDoor(tempState(), "Test PC", port = 0, videoSourceFactory = { FakeVideoSource(fakeSets, fakeFrames, intervalMs = 10) }, inputSink = sink)
+        val door = HostDoor(tempState(), "Test PC", port = 0, clipboard = null, videoSourceFactory = { FakeVideoSource(fakeSets, fakeFrames, intervalMs = 10) }, inputSink = sink)
         door.use {
             val device = Identity.generate()
 
