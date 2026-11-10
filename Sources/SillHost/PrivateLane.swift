@@ -1,3 +1,4 @@
+import ApplicationServices
 import Foundation
 import Network
 import ScreenCaptureKit
@@ -35,6 +36,16 @@ final class PrivateLane {
     private var generation = 0
 
     var askedFPS: Int { viewport?.fps ?? 60 }
+    /// Whether this window is on its own virtual display right now, and (when it is) that
+    /// display's placement: the pid to activate, and the element a click, key or text needs
+    /// keyed (StreamCoordinator.raiseIfInteracting, generalised to serve a lane too).
+    var isStaged: Bool { stage.isStaged }
+    var stagedPID: pid_t? { stage.placement?.pid }
+    var stagedElement: AXUIElement? { stage.placement?.element }
+    /// A stranger window left on this lane's virtual display, moved off so a click lands
+    /// (VirtualStage.evictForeignWindows; the regular path's own `stage` does the same for the
+    /// shared stream).
+    func evictForeignWindows() { stage.evictForeignWindows() }
 
     init(connection: NWConnection, server: StreamServer, sizer: WindowSizer, catalog: WindowCatalog, serial: UInt32) {
         self.connection = connection

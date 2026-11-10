@@ -211,6 +211,12 @@ package final class StreamCoordinator {
     private var nextLaneSerial: UInt32 = 2
     /// A launch from a window's own stream: its first window is picked there, not on `active`.
     private var pendingLaunchLane: ObjectIdentifier?
+    /// A lane's own input held for its activation (`raiseLaneIfInteracting`), replayed in order
+    /// once its app is up: the same idea as the shared path's `heldInput`/`holdUntil`, kept
+    /// separate per lane (keyed by its connection) so one lane's activation never delays another
+    /// lane's input, or the shared stream's.
+    private var laneHeldInput: [ObjectIdentifier: [Held]] = [:]
+    private var laneHoldUntil: [ObjectIdentifier: CFAbsoluteTime] = [:]
     /// The window streaming in regular mode was in full screen when the catalog last listed it (its
     /// frame covered a display), or when it was picked: off the list, it may be leaving full screen
     /// (`windowsChanged`, WindowRestore.keepsStreaming).
@@ -569,6 +575,11 @@ package final class StreamCoordinator {
                 if let lane = self.lanes.removeValue(forKey: gone) {
                     self.server.setOwnStream(gone, false)
                     await lane.stop()
+                    // Its own raise throttle and anything held for its activation: nothing left to
+                    // release it, or it would land after the lane the identifier moves to, if any.
+                    self.laneHeldInput[gone] = nil
+                    self.laneHoldUntil[gone] = nil
+                    self.raiseThrottle.forget(RaiseKey.lane(gone))
                 }
                 self.clientFPS[ObjectIdentifier(connection)] = nil
                 self.fitScales[ObjectIdentifier(connection)] = nil
@@ -1231,7 +1242,10 @@ package final class StreamCoordinator {
                     return
                 }
                 gestureChords.input(Self.gestureInput(event))
-                injector.apply(event, in: rect, from: device)
+                // A synthetic host acts on nothing (see the shared path below): it activates and
+                // raises nothing either.
+                if !synthetic { raiseLaneIfInteracting(event, lane: lane, device: device) }
+                deliverToLane(event, in: rect, from: device)
                 return
             }
             guard let rect = currentSourceRect() else {
@@ -2309,8 +2323,12 @@ package final class StreamCoordinator {
     /// entering or leaving full screen: the staged full-screen window, or in regular mode one that was
     /// full screen when last listed or that Sill fitted (`windowsChanged`).
     private var missingPolls = 0
-    private var lastRaiseCheck: CFAbsoluteTime = 0
-    private var lastActivationAt: CFAbsoluteTime = 0
+    /// Raise's throttle, per subject: `.shared` for `active` (one window at a time, as before),
+    /// `.lane` per lane's own connection, so switching quickly between a device's shared window
+    /// and a lane does not make one skip a needed raise because the other checked recently. The
+    /// decision and the clocks themselves are `RaisePolicy` (pure, tested on its own).
+    private enum RaiseKey: Hashable { case shared; case lane(ObjectIdentifier) }
+    private var raiseThrottle = RaisePolicy.Throttle()
     /// Input held for an activation, replayed in order once the app is up, each with the device that
     /// sent it (its keys are its own, KeyStrokes); a gesture's chord that arrives meanwhile waits
     /// behind it, so a click just before the gesture lands first. A device the Mac no longer serves, or
@@ -2354,6 +2372,36 @@ package final class StreamCoordinator {
             }
         }
         releaseKeysOfDevicesThatLeft()
+    }
+
+    /// The lane equivalent of `deliver`/`releaseHeldInput` above, held separately per lane (see
+    /// `laneHeldInput`/`laneHoldUntil`) so one lane's activation never delays another lane's
+    /// input or the shared stream's. `logClick` is the shared path's own diagnostic (it reads
+    /// `active`, not a lane's source) and is left to it.
+    private func deliverToLane(_ event: InputEvent, in rect: CGRect, from device: KeyStrokes.Device) {
+        if !(laneHeldInput[device]?.isEmpty ?? true) || CFAbsoluteTimeGetCurrent() < (laneHoldUntil[device] ?? 0) {
+            laneHeldInput[device, default: []].append(.input(event, rect, device))
+            return
+        }
+        injector.apply(event, in: rect, from: device)
+    }
+
+    private func releaseLaneHeldInput(_ device: ObjectIdentifier) {
+        laneHoldUntil[device] = nil
+        let held = laneHeldInput[device] ?? []
+        laneHeldInput[device] = nil
+        for item in held {
+            guard case .input(let event, let rect, let heldDevice) = item else { continue }
+            if gone(heldDevice) || lockReading.locked {
+                if injector.releasesWhatItHolds(event, from: heldDevice) { injector.apply(event, in: .null, from: heldDevice) }
+                else { Stats.shared.bump(gone(heldDevice) ? "in.revoked" : "in.locked") }
+                continue
+            }
+            injector.apply(event, in: rect, from: heldDevice)
+        }
+        // `releaseKeysOfDevicesThatLeft` is left to the shared path's own `releaseHeldInput`:
+        // `leftWhileHeld` only fills while the shared hold (`heldInput`/`holdUntil`) is up, so a
+        // lane's hold clearing first must not empty it ahead of that.
     }
 
     /// A device the Mac no longer serves (`revoked`), or one that left while input was held
@@ -2433,53 +2481,85 @@ package final class StreamCoordinator {
         // the old one here would put it back in front of the pick (a flick's momentum scroll keeps
         // arriving through a tap on the switcher). The event itself is still delivered, so no
         // key-up or button-up goes missing.
-        guard !switching, case .window(let id) = active else { return }
+        guard !switching, case .window(let id) = active, let rect = currentSourceRect() else { return }
+        let staged = virtualDisplay && stage.isStaged
+        raiseIfInteracting(event, key: .shared, id: id, rect: rect, staged: staged,
+                           pid: staged ? stage.placement?.pid : catalog.window(id: id)?.owningApplication?.processID,
+                           element: { [self] in
+                               staged ? stage.placement?.element : catalog.window(id: id).flatMap { sizer.element(for: $0) }
+                           },
+                           evictForeignWindows: { [self] in stage.evictForeignWindows() },
+                           setHold: { [self] until in holdUntil = until },
+                           onReady: { [self] in releaseHeldInput() })
+    }
+
+    /// The lane equivalent of the above, for a window one of a device's later iPad windows asks
+    /// for (`PrivateLane`). Nothing mid-switch, or one with nowhere to land yet. Everything else
+    /// is shared with the regular path through the core below, with `key: .lane(device)` so its
+    /// throttle and hold never collide with the shared stream's or another lane's.
+    private func raiseLaneIfInteracting(_ event: InputEvent, lane: PrivateLane, device: ObjectIdentifier) {
+        guard !lane.switching, case .window(let id) = lane.source else { return }
+        let rect = lane.aim
+        guard rect.width > 0, rect.height > 0 else { return }
+        let staged = virtualDisplay && lane.isStaged
+        raiseIfInteracting(event, key: .lane(device), id: id, rect: rect, staged: staged,
+                           pid: staged ? lane.stagedPID : catalog.window(id: id)?.owningApplication?.processID,
+                           element: { [self] in
+                               staged ? lane.stagedElement : catalog.window(id: id).flatMap { sizer.element(for: $0) }
+                           },
+                           evictForeignWindows: { lane.evictForeignWindows() },
+                           setHold: { [self] until in laneHoldUntil[device] = until },
+                           onReady: { [self] in releaseLaneHeldInput(device) })
+    }
+
+    /// The decision and the Accessibility work `raiseIfInteracting` and `raiseLaneIfInteracting`
+    /// both need, kept in one place so the shared stream's window and a lane's own are judged
+    /// exactly alike: whether `event` needs the app active and the window key (a click, a key
+    /// down or text) or only the window uncovered (a scroll), throttled per `key` (one check per
+    /// 0.5 s, one activation attempt per 2 s), then activation and raising through Accessibility
+    /// only, never Launch Services (see `activate`). `id`/`rect`/`staged`/`pid`/`element` and
+    /// `evictForeignWindows` describe the one window this call is about — the shared stream's
+    /// `active` one, read off `stage`, or a lane's own, read off its own stage — and `setHold`/
+    /// `onReady` are the caller's own hold and release (`heldInput`/`holdUntil` for the shared
+    /// path, `laneHeldInput`/`laneHoldUntil` per lane), so a lane's activation never delays the
+    /// shared stream's input, or another lane's.
+    private func raiseIfInteracting(_ event: InputEvent, key: RaiseKey, id: CGWindowID, rect: CGRect, staged: Bool,
+                                     pid: pid_t?, element: @escaping () -> AXUIElement?,
+                                     evictForeignWindows: @escaping () -> Void,
+                                     setHold: @escaping (CFAbsoluteTime) -> Void,
+                                     onReady: @escaping () -> Void) {
         // Scroll routes to the window under the cursor whatever the active app is: it only needs
         // uncovering (regular path). Clicks, keys and text need the app active and the window key.
-        let needsFocus: Bool
-        switch event {
-        case .pointer(let action, _, _): guard action == .leftDown || action == .rightDown else { return }; needsFocus = true
-        case .scroll: needsFocus = false
-        case .scrollGesture(let phase, _, _): guard phase == .began else { return }; needsFocus = false
-        case .key(_, let down, _): guard down else { return }; needsFocus = true
-        case .text: needsFocus = true
-        }
+        guard let needsFocus = RaisePolicy.needsFocus(for: event) else { return }
         let now = CFAbsoluteTimeGetCurrent()
-        guard now - lastRaiseCheck > 0.5 else { return }     // a burst of keys or scroll ticks is one check
-        lastRaiseCheck = now
-        let staged = virtualDisplay && stage.isStaged
-        guard let pid = staged ? stage.placement?.pid : catalog.window(id: id)?.owningApplication?.processID else { return }
+        guard raiseThrottle.shouldCheck(key, now: now) else { return }     // a burst of keys or scroll ticks is one check
+        guard let pid else { return }
         // `NSWorkspace.frontmostApplication` is stale in a process without an AppKit run loop
         // (measured: it named an app that had not been active for minutes), so it is only used
         // under that loop (the app; the CLI's --virtual-display). Otherwise the active app is read
         // off the window list: the owner of the topmost layer-0 window. Covered = another app's
         // window under the click point.
-        let point = injectorProbePoint(event)
+        let point = Self.injectorProbePoint(event, in: rect, displayScale: streamDisplayScale)
         let cover = point.flatMap { Self.topmostWindow(at: $0) }
         let covered = cover != nil && cover?.id != id            // any other window over the spot, same app or not
         // On the virtual display a cover is a stranger (a window left there by an earlier run):
         // move it off, then the click lands.
-        if staged, covered { stage.evictForeignWindows() }
+        if staged, covered { evictForeignWindows() }
         let notActive = needsFocus && Self.activePID(trustAppKit: appKitLoop) != pid
         guard notActive || covered else { return }
         // A failed activation must not stall every later interaction: one attempt per 2 s.
-        guard now - lastActivationAt > 2 else { return }
-        lastActivationAt = now
+        guard raiseThrottle.shouldActivate(key, now: now) else { return }
         // An app that let the activation run into its timeout gets no more AX calls, each of which
         // would wait out another second; the hold below still applies.
         let answered = notActive ? activate(pid: pid) : true
         // The streamed window must also be the app's key window, or its first click only makes it
         // key (acceptsFirstMouse is false for most controls). Raising lifts it above the cover.
         // One window lookup serves both.
-        if answered {
-            if staged, let element = stage.placement?.element {
-                if needsFocus { WindowSizer.makeKey(element) }
-            } else if let w = catalog.window(id: id), let element = sizer.element(for: w) {
-                if needsFocus { WindowSizer.makeKey(element) }
-                if covered, WindowSizer.raise(element) { Stats.shared.bump("win.raised") }
-            }
+        if answered, let el = element() {
+            if needsFocus { WindowSizer.makeKey(el) }
+            if !staged, covered, WindowSizer.raise(el) { Stats.shared.bump("win.raised") }
         }
-        holdUntil = now + Self.activationTimeout
+        setHold(now + Self.activationTimeout)
         Task { @MainActor in
             // Replay as soon as our window is the one under the click (usually 50–200 ms), or at
             // the timeout. On the virtual display nothing can cover it: wait for activation only.
@@ -2490,7 +2570,7 @@ package final class StreamCoordinator {
                 if active && onTop { break }
                 try? await Task.sleep(for: .milliseconds(20))
             }
-            self.releaseHeldInput()
+            onReady()
         }
     }
 
@@ -2551,11 +2631,10 @@ package final class StreamCoordinator {
     }
 
     /// The screen point an interaction lands on (for the topmost-window check); nil for keys.
-    private func injectorProbePoint(_ event: InputEvent) -> CGPoint? {
-        guard let rect = currentSourceRect() else { return nil }
+    private static func injectorProbePoint(_ event: InputEvent, in rect: CGRect, displayScale: CGFloat?) -> CGPoint? {
         switch event {
         case .pointer(_, let x, let y), .scroll(let x, let y, _, _), .scrollGesture(_, let x, let y):
-            return InputLanding.point(x: x, y: y, in: rect, displayScale: streamDisplayScale)
+            return InputLanding.point(x: x, y: y, in: rect, displayScale: displayScale)
         default: return nil
         }
     }
@@ -2740,8 +2819,7 @@ package final class StreamCoordinator {
         var answered = true
         if !frontmost {
             let now = CFAbsoluteTimeGetCurrent()
-            guard now - lastActivationAt > 2 else { return false }
-            lastActivationAt = now
+            guard raiseThrottle.shouldActivate(RaiseKey.shared, now: now) else { return false }
             answered = activate(pid: pid)
         }
         // An app that let the activation run into its timeout gets no more AX calls from here.
