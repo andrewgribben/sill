@@ -96,14 +96,14 @@ object Win32 {
     fun window(id: Long): Window? = windows().firstOrNull { it.id == id }
 
     /** Restores and brings a window forward. Windows lets a background process do that only right after
-     * input, so an Alt press and release goes first (the documented workaround's usual form). */
+     * input, so a key press goes first: 0xE8, unassigned, as Alt would leave a window's menu keys showing. */
     fun bringForward(id: Long) {
         if (!available) return
         val h = hwnd(id)
         if ((isWindow.invokeExact(h) as Int) == 0) return
         if ((isIconic.invokeExact(h) as Int) != 0) showWindow.invokeExact(h, 9 /* SW_RESTORE */) as Int
-        keybdEvent.invoke(0x12.toByte(), 0.toByte(), 0, 0L)            // VK_MENU down
-        keybdEvent.invoke(0x12.toByte(), 0.toByte(), 2, 0L)            // KEYEVENTF_KEYUP
+        keybdEvent.invoke(0xE8.toByte(), 0.toByte(), 0, 0L)
+        keybdEvent.invoke(0xE8.toByte(), 0.toByte(), 2, 0L)            // KEYEVENTF_KEYUP
         setForegroundWindow.invokeExact(h) as Int
     }
 
