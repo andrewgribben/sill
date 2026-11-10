@@ -269,6 +269,8 @@ class HostDoor(
         }
 
         private fun select(src: StreamSource) {
+            // A device asks for the Desktop by itself and may ask again: keep the capture that runs.
+            if (src == active && video != null) { send(StreamMessage.json(Kind.WINDOW_LIST, list().toJson())); return }
             active = src
             activeMonitor = if (src == StreamSource.Desktop) 0 else -1
             send(StreamMessage.json(Kind.WINDOW_LIST, list().toJson()))

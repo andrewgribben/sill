@@ -25,13 +25,17 @@ class RobotInputSink : InputSink {
     }
 
     private val wheel = WheelCarry()
+    private val sideways = WheelCarry()
 
     override fun scroll(dxPoints: Double, dyPoints: Double) {
-        // Robot only scrolls vertically; a horizontal component is dropped (shortcut: Shift+wheel
-        // is Windows' usual trick for horizontal scroll, not implemented in phase 1).
-        // A device's positive dy moves the content down, which is Robot's negative (wheel away).
-        val notches = wheel.notches(dyPoints)
-        if (notches != 0) robot?.mouseWheel(-notches)
+        val r = robot ?: return
+        // A device's positive delta moves the content down (or right), which is Robot's negative (wheel away).
+        val down = wheel.notches(dyPoints)
+        if (down != 0) r.mouseWheel(-down)
+        // Robot's wheel is vertical only; Windows apps scroll sideways for Shift+wheel.
+        // shortcut: Shift+wheel, not WM_MOUSEHWHEEL, so an app that reads Shift+wheel otherwise (a zoom) gets that.
+        val right = sideways.notches(dxPoints)
+        if (right != 0) { r.keyPress(KeyEvent.VK_SHIFT); r.mouseWheel(-right); r.keyRelease(KeyEvent.VK_SHIFT) }
     }
 
     override fun key(hidUsage: Int, down: Boolean, modifiers: Long) {
