@@ -224,6 +224,7 @@ package final class StreamCoordinator {
     /// The app of the window `select` last resolved, so the sound still finds it while a regular-mode
     /// window streams on off the catalog's list (`windowsChanged`'s looks, issue #57; `audioKey`).
     private var streamedPID: (window: CGWindowID, pid: pid_t)?
+    private var siblingReturnWindowID: CGWindowID?
     /// Each connection's kind 17 changes of the last second (applied or refused), and when its
     /// "ignored" line was last printed: `settingsPerSecond` a second, one line a second at most.
     private var settingsArrivals: [ObjectIdentifier: [CFAbsoluteTime]] = [:]
@@ -494,6 +495,7 @@ package final class StreamCoordinator {
         menus.currentTarget = { [weak self] in self?.menuTarget() }
         menus.onSubscribersChanged = { [weak self] any in self?.watchFrontmostApp(any) }
         catalog.onPolled = { [weak self] in self?.catalogPolled() }
+        catalog.onSiblingWindow = { [weak self] id in self?.siblingWindowChanged(id) }
         // The sound's messages go straight from its queue to the network queue; its status to the Mac's.
         let server = self.server
         audio.onFormat = { data, epoch in server.broadcastAudio(format: data, epoch: epoch) }
@@ -1812,6 +1814,10 @@ package final class StreamCoordinator {
     /// device, or a pick made before the device heard of the close, can still let it land during
     /// a restart that follows the user's pick, and then it is queued like the user's own.
     private func handlePick(_ source: StreamSource) async {
+        // A user's own pick always wins: forget any pending return-to-the-old-window state, but
+        // keep the callback armed — it must still fire for whatever window this pick lands on.
+        siblingReturnWindowID = nil
+        catalog.forgetSiblingFollow()
         if switching {
             if let r = restartOf, source != r { pickArrivedWhileSwitching = source }
             return
@@ -2740,6 +2746,20 @@ package final class StreamCoordinator {
     private func menuTargetChanged() {
         guard menus.hasSubscribers else { return }
         menus.setTarget(menuTarget())
+    }
+
+    private func siblingWindowChanged(_ id: UInt32?) {
+        guard !virtualDisplay, !lockReading.locked else { return }
+        if let id {
+            guard case .window(let original) = active, !switching,
+                  let sibling = catalog.window(id: id) else { return }
+            siblingReturnWindowID = original
+            Task { @MainActor in await self.select(.window(sibling.windowID)) }
+        } else if let original = siblingReturnWindowID {
+            siblingReturnWindowID = nil
+            guard catalog.window(id: original) != nil else { return }
+            Task { @MainActor in await self.select(.window(original)) }
+        }
     }
 
     /// Every catalog poll (2 s) while a device is connected: the menus, and a window streaming in
